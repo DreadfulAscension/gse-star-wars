@@ -90,7 +90,6 @@ def simulate_week():
     
     st.session_state.current_date += timedelta(days=7)
     
-    # Record portfolio net worth
     for player, p in portfolios.items():
         if player not in portfolio_history:
             portfolio_history[player] = []
@@ -152,7 +151,6 @@ with tab3:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.write(f"**Net Worth**: {net:,.2f} GC")
 
-        # Trade Section - Fixed to always use current price
         st.subheader("Trade")
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -163,7 +161,6 @@ with tab3:
             qty = st.number_input("Shares", min_value=1, value=100)
         
         if st.button(action, type="primary"):
-            # Always get the absolute latest price
             current_price = stocks[tr_ticker]["price"]
             if action == "Buy":
                 cost = current_price * qty * 1.015
@@ -173,7 +170,7 @@ with tab3:
                     st.success(f"✅ Bought {qty} shares of {tr_ticker} at {current_price:,.2f} GC")
                 else:
                     st.error("Not enough credits!")
-            else:  # Sell
+            else:
                 holdings = p.get("holdings", {})
                 if tr_ticker in holdings and holdings[tr_ticker] >= qty:
                     revenue = current_price * qty * 0.985
@@ -183,4 +180,46 @@ with tab3:
                         del p["holdings"][tr_ticker]
                     st.success(f"✅ Sold {qty} shares of {tr_ticker} at {current_price:,.2f} GC")
                 else:
-                    st.error("Not enough shares
+                    st.error("Not enough shares!")
+            st.rerun()
+
+with tab4:
+    st.subheader("📈 Portfolio Performance")
+    if portfolio_history:
+        player_sel = st.selectbox("Select Player", list(portfolio_history.keys()), key="perf_player")
+        hist = portfolio_history[player_sel]
+        if len(hist) > 1:
+            df = pd.DataFrame(hist)
+            df["date"] = pd.to_datetime(df["date"])
+            fig = go.Figure(go.Scatter(x=df["date"], y=df["net_worth"], mode='lines+markers'))
+            fig.update_layout(title=f"{player_sel}'s Net Worth Over Time", height=600)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Simulate weeks to build performance history.")
+    else:
+        st.info("No portfolio history yet.")
+
+with tab5:
+    st.subheader("Advance the Market")
+    weeks = st.slider("Number of weeks", 1, 12, 1)
+    if st.button("🚀 Simulate Weeks", type="primary"):
+        for _ in range(weeks):
+            simulate_week()
+        st.success(f"Advanced {weeks} weeks!")
+        st.rerun()
+
+with tab6:
+    st.subheader("Hostile Takeover")
+    tkr = st.selectbox("Target Company", list(stocks.keys()), key="takeover")
+    shares = st.number_input("Shares Owned", 0, 20000000, 1500000, step=100000)
+    pct = (shares / 10000000) * 100
+    chance = max(0, min(95, (pct - 15) * 4 - stocks[tkr]["vol"] * 30))
+    st.metric("Ownership", f"{pct:.1f}%")
+    st.metric("Success Chance", f"{chance:.1f}%")
+
+with st.sidebar:
+    if st.button("💾 Save Game"):
+        save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
+        st.success("Game Saved!")
+
+save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
