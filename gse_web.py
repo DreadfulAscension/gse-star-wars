@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Galactic Stock Exchange", layout="wide", page_icon="🌌")
 
-# Stocks
+# Stocks (same as before)
 stocks = {
     "KDY": {"name": "Kuat Drive Yards", "price": 245.0, "vol": 0.12, "sector": "Starships", "div_yield": 0.018},
     "CZRK": {"name": "Czerka Corporation", "price": 178.0, "vol": 0.18, "sector": "Conglomerate", "div_yield": 0.012},
@@ -48,120 +48,12 @@ def load_data():
 
 def save_data(portfolios, current_date, price_history):
     try:
-        data = {
-            "stocks": {t: stocks[t]["price"] for t in stocks},
-            "portfolios": portfolios,
-            "current_date": current_date.isoformat(),
-            "price_history": price_history
-        }
+        data = {"stocks": {t: stocks[t]["price"] for t in stocks}, "portfolios": portfolios, "current_date": current_date.isoformat(), "price_history": price_history}
         with open(DATA_FILE, "w") as f:
             json.dump(data, f, indent=2)
     except:
         pass
 
-# Initialize
 if 'initialized' not in st.session_state:
     st.session_state.portfolios, st.session_state.current_date, st.session_state.price_history = load_data()
     st.session_state.initialized = True
-
-portfolios = st.session_state.portfolios
-price_history = st.session_state.price_history
-
-for ticker in stocks:
-    if ticker not in price_history:
-        price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": stocks[ticker]["price"]}]
-
-def simulate_week():
-    for ticker, data in stocks.items():
-        roll = random.gauss(0, data["vol"] * 100)
-        if roll > 20: change = random.uniform(18, 40)
-        elif roll > 8: change = random.uniform(5, 18)
-        elif roll > -9: change = random.uniform(-5, 5)
-        elif roll > -21: change = random.uniform(-18, -5)
-        else: change = random.uniform(-40, -18)
-        
-        new_price = max(1.0, round(data["price"] * (1 + change/100), 2))
-        data["price"] = new_price
-        price_history[ticker].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": new_price})
-    
-    st.session_state.current_date += timedelta(days=7)
-
-# UI
-st.title("🌌 Galactic Stock Exchange")
-st.caption(f"**The Old Republic Era** • {st.session_state.current_date.strftime('%Y-%m-%d')}")
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Market", "📈 Charts", "💼 Portfolio", "🚀 Simulate", "🏦 Takeover"])
-
-with tab1:
-    st.subheader("Current Market")
-    df = pd.DataFrame([{"Ticker": t, "Company": info["name"], "Price": f"{info['price']:,.2f}"} for t, info in stocks.items()])
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-with tab2:
-    st.subheader("Price Charts")
-    ticker = st.selectbox("Company", list(stocks.keys()))
-    weeks = st.slider("Last N weeks", 5, 100, 30)
-    if len(price_history.get(ticker, [])) > 1:
-        df = pd.DataFrame(price_history[ticker][-weeks:])
-        df["date"] = pd.to_datetime(df["date"])
-        fig = go.Figure(go.Scatter(x=df["date"], y=df["price"], mode="lines+markers"))
-        fig.update_layout(title=f"{ticker} Price History", height=500)
-        st.plotly_chart(fig, use_container_width=True)
-
-with tab3:
-    player = st.text_input("Character Name", "Jedi Knight Sera")
-    if player not in portfolios:
-        if st.button("Create Portfolio"):
-            portfolios[player] = {"cash": 250000.0, "holdings": {}}
-            st.rerun()
-    
-    if player in portfolios:
-        p = portfolios[player]
-        st.write(f"**Cash**: {p['cash']:,.2f} GC")
-        col1, col2, col3 = st.columns(3)
-        with col1: tr_ticker = st.selectbox("Ticker", list(stocks.keys()), key="tr")
-        with col2: action = st.radio("Action", ["Buy", "Sell"])
-        with col3: qty = st.number_input("Shares", min_value=1, value=100)
-        
-        if st.button(action):
-            price = stocks[tr_ticker]["price"]
-            if action == "Buy":
-                if p["cash"] >= price * qty * 1.015:
-                    p["cash"] -= price * qty * 1.015
-                    p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
-                    st.success("Bought!")
-                else:
-                    st.error("Not enough credits!")
-            else:
-                if tr_ticker in p.get("holdings", {}) and p["holdings"][tr_ticker] >= qty:
-                    p["cash"] += price * qty * 0.985
-                    p["holdings"][tr_ticker] -= qty
-                    if p["holdings"][tr_ticker] <= 0:
-                        del p["holdings"][tr_ticker]
-                    st.success("Sold!")
-                else:
-                    st.error("Not enough shares!")
-            st.rerun()
-
-with tab4:
-    weeks = st.slider("Weeks", 1, 12, 1)
-    if st.button("🚀 Simulate", type="primary"):
-        for _ in range(weeks):
-            simulate_week()
-        st.success("Market Updated!")
-        st.rerun()
-
-with tab5:
-    tkr = st.selectbox("Target", list(stocks.keys()), key="to")
-    shares = st.number_input("Shares Owned", 0, 20000000, 1500000)
-    pct = shares / 100000
-    chance = max(0, min(95, (pct - 15) * 4 - stocks[tkr]["vol"] * 30))
-    st.metric("Ownership", f"{pct:.1f}%")
-    st.metric("Chance", f"{chance:.1f}%")
-
-with st.sidebar:
-    if st.button("Save Game"):
-        save_data(portfolios, st.session_state.current_date, price_history)
-        st.success("Saved")
-
-save_data(portfolios, st.session_state.current_date, price_history)
