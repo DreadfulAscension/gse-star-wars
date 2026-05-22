@@ -42,11 +42,7 @@ def load_data():
                 for ticker, price in data.get("stocks", {}).items():
                     if ticker in stocks:
                         stocks[ticker]["price"] = float(price)
-                return (
-                    data.get("portfolios", {}),
-                    datetime.fromisoformat(data.get("current_date", datetime.now().isoformat())),
-                    data.get("price_history", {})
-                )
+                return data.get("portfolios", {}), datetime.fromisoformat(data.get("current_date", datetime.now().isoformat())), data.get("price_history", {})
     except:
         pass
     return {}, datetime.now(), {}
@@ -64,51 +60,5 @@ def save_data(portfolios, current_date, price_history):
     except:
         pass
 
-# ====================== INITIALIZE ======================
-if 'initialized' not in st.session_state:
-    st.session_state.portfolios, st.session_state.current_date, st.session_state.price_history = load_data()
-    st.session_state.initialized = True
-
-portfolios = st.session_state.portfolios
-price_history = st.session_state.price_history
-
-# Initialize price history
-for ticker in stocks:
-    if ticker not in price_history:
-        price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": stocks[ticker]["price"]}]
-
-# ====================== SIMULATE ======================
-def simulate_week():
-    for ticker, data in stocks.items():
-        roll = random.gauss(0, data["vol"] * 100)
-        
-        if roll > 20:   change = random.uniform(18, 40)
-        elif roll > 8:  change = random.uniform(5, 18)
-        elif roll > -9: change = random.uniform(-5, 5)
-        elif roll > -21:change = random.uniform(-18, -5)
-        else:           change = random.uniform(-40, -18)
-        
-        new_price = max(1.0, round(data["price"] * (1 + change/100), 2))
-        data["price"] = new_price
-        
-        price_history[ticker].append({
-            "date": st.session_state.current_date.strftime('%Y-%m-%d'),
-            "price": new_price
-        })
-    
-    st.session_state.current_date += timedelta(days=7)
-
-# ====================== UI ======================
-st.title("🌌 Galactic Stock Exchange")
-st.caption(f"**The Old Republic Era** • {st.session_state.current_date.strftime('%Y-%m-%d')}")
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Market", "📈 Charts", "💼 Portfolio", "🚀 Simulate", "🏦 Takeover"])
-
-with tab1:
-    st.subheader("Current Market Prices")
-    market_data = [{
-        "Ticker": t,
-        "Company": info["name"],
-        "Sector": info["sector"],
-        "Price (GC)": f"{info['price']:,.2f}",
-        "
+# Initialize
+if 'initialized
