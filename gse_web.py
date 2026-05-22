@@ -29,36 +29,4 @@ stocks = {
     "SENX": {"name": "Senna Consumer Group", "price": 53.0, "vol": 0.09, "sector": "Retail", "div_yield": 0.023},
     "BANU": {"name": "Bantha Brands Inc.", "price": 41.0, "vol": 0.11, "sector": "Consumer", "div_yield": 0.027},
     "JAL": {"name": "Jalaar Shipyards", "price": 134.0, "vol": 0.17, "sector": "Starships", "div_yield": 0.013},
-    "VOSS": {"name": "Voss Mystics Ltd.", "price": 158.0, "vol": 0.22, "sector": "Cultural", "div_yield": 0.011},
-}
-
-DATA_FILE = "gse_data.json"
-
-def load_data():
-    try:
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "r") as f:
-                data = json.load(f)
-                for ticker, price in data.get("stocks", {}).items():
-                    if ticker in stocks:
-                        stocks[ticker]["price"] = float(price)
-                return data.get("portfolios", {}), datetime.fromisoformat(data.get("current_date", datetime.now().isoformat())), data.get("price_history", {})
-    except:
-        pass
-    return {}, datetime.now(), {}
-
-def save_data(portfolios, current_date, price_history):
-    try:
-        data = {
-            "stocks": {t: stocks[t]["price"] for t in stocks},
-            "portfolios": portfolios,
-            "current_date": current_date.isoformat(),
-            "price_history": price_history
-        }
-        with open(DATA_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except:
-        pass
-
-# Initialize
-if 'initialized
+    "VOSS": {"name": "Voss Mystics Ltd.",
