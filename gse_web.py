@@ -64,6 +64,103 @@ def save_data(portfolios, current_date, price_history):
     except:
         pass
 
-# Initialize Session State
+# ====================== INITIALIZE ======================
 if 'initialized' not in st.session_state:
-    st.session_state.portfolios, st.session_state.current_date, st.session_state.price_history = load
+    st.session_state.portfolios, st.session_state.current_date, st.session_state.price_history = load_data()
+    st.session_state.initialized = True
+
+portfolios = st.session_state.portfolios
+price_history = st.session_state.price_history
+
+# Initialize price history for all stocks
+for ticker in stocks:
+    if ticker not in price_history:
+        price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": stocks[ticker]["price"]}]
+
+# ====================== SIMULATE ======================
+def simulate_week():
+    for ticker, data in stocks.items():
+        roll = random.gauss(0, data["vol"] * 100)
+        
+        if roll > 20:   change = random.uniform(18, 40)
+        elif roll > 8:  change = random.uniform(5, 18)
+        elif roll > -9: change = random.uniform(-5, 5)
+        elif roll > -21:change = random.uniform(-18, -5)
+        else:           change = random.uniform(-40, -18)
+        
+        new_price = max(1.0, round(data["price"] * (1 + change/100), 2))
+        data["price"] = new_price
+        
+        price_history[ticker].append({
+            "date": st.session_state.current_date.strftime('%Y-%m-%d'),
+            "price": new_price
+        })
+    
+    st.session_state.current_date += timedelta(days=7)
+
+# ====================== UI ======================
+st.title("🌌 Galactic Stock Exchange")
+st.caption(f"**The Old Republic Era** • {st.session_state.current_date.strftime('%Y-%m-%d')}")
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Market", "📈 Charts", "💼 Portfolio", "🚀 Simulate", "🏦 Takeover"])
+
+with tab1:
+    st.subheader("Current Market Prices")
+    market_data = [{
+        "Ticker": t,
+        "Company": info["name"],
+        "Sector": info["sector"],
+        "Price (GC)": f"{info['price']:,.2f}",
+        "Div Yield": f"{info['div_yield']*100:.1f}%"
+    } for t, info in stocks.items()]
+    st.dataframe(pd.DataFrame(market_data), use_container_width=True, hide_index=True)
+
+with tab2:
+    st.subheader("Price History Charts")
+    ticker = st.selectbox("Select Company", list(stocks.keys()))
+    weeks = st.slider("Show last N weeks", 5, 100, 40)
+    
+    if ticker in price_history and len(price_history[ticker]) > 1:
+        df = pd.DataFrame(price_history[ticker][-weeks:])
+        df["date"] = pd.to_datetime(df["date"])
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df["date"], y=df["price"], mode='lines+markers'))
+        fig.update_layout(title=f"{ticker} - {stocks[ticker]['name']}", xaxis_title="Date", yaxis_title="Price (GC)", template="plotly_dark", height=500)
+        st.plotly_chart(fig, use_container_width=True)
+
+with tab3:
+    player = st.text_input("Character Name", "Jedi Knight Sera")
+    if player not in portfolios:
+        if st.button("Create Portfolio"):
+            portfolios[player] = {"cash": 250000.0, "holdings": {}}
+            st.rerun()
+    
+    if player in portfolios:
+        p = portfolios[player]
+        st.write(f"**Cash**: {p['cash']:,.2f} GC")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            tr_ticker = st.selectbox("Ticker", list(stocks.keys()), key="trade_ticker")
+        with col2:
+            action = st.radio("Action", ["Buy", "Sell"])
+        with col3:
+            qty = st.number_input("Shares", min_value=1, value=100)
+        
+        if st.button(action, type="primary"):
+            price = stocks[tr_ticker]["price"]
+            if action == "Buy":
+                cost = price * qty * 1.015
+                if p["cash"] >= cost:
+                    p["cash"] -= cost
+                    p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
+                    st.success("✅ Bought!")
+                else:
+                    st.error("Not enough credits!")
+            else:
+                if tr_ticker in p.get("holdings", {}) and p["holdings"][tr_ticker] >= qty:
+                    p["cash"] += price * qty * 0.985
+                    p["holdings"][tr_ticker] -= qty
+                    if p["holdings"][tr_ticker] <= 0:
+                        del p["holdings"][
