@@ -71,7 +71,6 @@ portfolios = st.session_state.portfolios
 price_history = st.session_state.price_history
 portfolio_history = st.session_state.portfolio_history
 
-# Initialize price history
 for ticker in stocks:
     if ticker not in price_history:
         price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": stocks[ticker]["price"]}]
@@ -91,12 +90,12 @@ def simulate_week():
     
     st.session_state.current_date += timedelta(days=7)
     
-    # Record portfolio net worth for all players
+    # Record portfolio net worth
     for player, p in portfolios.items():
         if player not in portfolio_history:
             portfolio_history[player] = []
         holdings = p.get("holdings", {})
-        net_worth = p["cash"]
+        net_worth = p.get("cash", 0)
         for t, shares in holdings.items():
             if t in stocks:
                 net_worth += shares * stocks[t]["price"]
@@ -120,8 +119,9 @@ with tab2:
     st.subheader("Stock Price Charts")
     ticker = st.selectbox("Select Company", list(stocks.keys()))
     weeks = st.slider("Last N weeks", 5, 100, 40)
-    if len(price_history.get(ticker, [])) > 1:
-        df = pd.DataFrame(price_history[ticker][-weeks:])
+    history = price_history.get(ticker, [])
+    if len(history) > 1:
+        df = pd.DataFrame(history[-weeks:])
         df["date"] = pd.to_datetime(df["date"])
         fig = go.Figure(go.Scatter(x=df["date"], y=df["price"], mode='lines+markers'))
         fig.update_layout(title=f"{ticker} - {stocks[ticker]['name']}", height=500)
@@ -129,7 +129,7 @@ with tab2:
 
 with tab3:
     st.subheader("💼 Your Portfolio")
-    player = st.text_input("Character Name", "Jedi Knight Sera", key="player")
+    player = st.text_input("Character Name", "Jedi Knight Sera", key="player_name")
     
     if player not in portfolios:
         if st.button("Create Portfolio"):
@@ -152,78 +152,35 @@ with tab3:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.write(f"**Net Worth**: {net:,.2f} GC")
 
-        # Trade
+        # Trade Section - Fixed to always use current price
         st.subheader("Trade")
         c1, c2, c3 = st.columns(3)
-        with c1: tr_ticker = st.selectbox("Company", list(stocks.keys()), key="trade")
-        with c2: action = st.radio("Action", ["Buy", "Sell"])
-        with c3: qty = st.number_input("Shares", min_value=1, value=100)
+        with c1:
+            tr_ticker = st.selectbox("Company", list(stocks.keys()), key="trade_ticker")
+        with c2:
+            action = st.radio("Action", ["Buy", "Sell"])
+        with c3:
+            qty = st.number_input("Shares", min_value=1, value=100)
         
         if st.button(action, type="primary"):
-            price = stocks[tr_ticker]["price"]
+            # Always get the absolute latest price
+            current_price = stocks[tr_ticker]["price"]
             if action == "Buy":
-                cost = price * qty * 1.015
+                cost = current_price * qty * 1.015
                 if p["cash"] >= cost:
                     p["cash"] -= cost
                     p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
-                    st.success("Bought!")
+                    st.success(f"✅ Bought {qty} shares of {tr_ticker} at {current_price:,.2f} GC")
                 else:
                     st.error("Not enough credits!")
-            else:
+            else:  # Sell
+                holdings = p.get("holdings", {})
                 if tr_ticker in holdings and holdings[tr_ticker] >= qty:
-                    p["cash"] += price * qty * 0.985
+                    revenue = current_price * qty * 0.985
+                    p["cash"] += revenue
                     p["holdings"][tr_ticker] -= qty
                     if p["holdings"][tr_ticker] <= 0:
                         del p["holdings"][tr_ticker]
-                    st.success("Sold!")
+                    st.success(f"✅ Sold {qty} shares of {tr_ticker} at {current_price:,.2f} GC")
                 else:
-                    st.error("Not enough shares!")
-            st.rerun()
-
-with tab4:
-    st.subheader("📈 Portfolio Performance Over Time")
-    if portfolio_history:
-        player_sel = st.selectbox("Select Player", list(portfolio_history.keys()))
-        if len(portfolio_history[player_sel]) > 1:
-            df = pd.DataFrame(portfolio_history[player_sel])
-            df["date"] = pd.to_datetime(df["date"])
-            
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df["date"], y=df["net_worth"], mode='lines+markers', name=player_sel))
-            fig.update_layout(
-                title=f"{player_sel}'s Net Worth Over Time",
-                xaxis_title="Date",
-                yaxis_title="Net Worth (GC)",
-                template="plotly_dark",
-                height=600
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Not enough data yet. Simulate weeks to track performance.")
-    else:
-        st.info("No portfolio history yet. Simulate market weeks after creating portfolios.")
-
-with tab5:
-    st.subheader("Advance the Market")
-    weeks = st.slider("Number of weeks", 1, 12, 1)
-    if st.button("🚀 Simulate Weeks", type="primary"):
-        for _ in range(weeks):
-            simulate_week()
-        st.success(f"Advanced {weeks} weeks!")
-        st.rerun()
-
-with tab6:
-    st.subheader("Hostile Takeover")
-    tkr = st.selectbox("Target Company", list(stocks.keys()), key="takeover")
-    shares = st.number_input("Shares Owned", 0, 20000000, 1500000, step=100000)
-    pct = (shares / 10000000) * 100
-    chance = max(0, min(95, (pct - 15) * 4 - stocks[tkr]["vol"] * 30))
-    st.metric("Ownership", f"{pct:.1f}%")
-    st.metric("Success Chance", f"{chance:.1f}%")
-
-with st.sidebar:
-    if st.button("💾 Save Game"):
-        save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
-        st.success("Game Saved!")
-
-save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
+                    st.error("Not enough shares
