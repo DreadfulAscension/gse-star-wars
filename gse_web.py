@@ -71,7 +71,7 @@ portfolios = st.session_state.portfolios
 price_history = st.session_state.price_history
 portfolio_history = st.session_state.portfolio_history
 
-# Initialize price history
+# Initialize histories
 for ticker in stocks:
     if ticker not in price_history or len(price_history[ticker]) == 0:
         price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": stocks[ticker]["price"]}]
@@ -90,6 +90,20 @@ def simulate_week():
         price_history[ticker].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": new_price})
     
     st.session_state.current_date += timedelta(days=7)
+    
+    # Record Portfolio Performance
+    for player, p in portfolios.items():
+        if player not in portfolio_history:
+            portfolio_history[player] = []
+        holdings = p.get("holdings", {})
+        net_worth = p.get("cash", 0)
+        for t, shares in holdings.items():
+            if t in stocks:
+                net_worth += shares * stocks[t]["price"]
+        portfolio_history[player].append({
+            "date": st.session_state.current_date.strftime('%Y-%m-%d'),
+            "net_worth": round(net_worth, 2)
+        })
     
     # Quarterly Dividends
     if st.session_state.current_date.day % 28 < 7:
@@ -111,30 +125,21 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Market", "📈 Stock Charts"
 
 with tab1:
     st.subheader("Current Market Prices")
-    df = pd.DataFrame([{
-        "Ticker": t, 
-        "Company": info["name"], 
-        "Price (GC)": f"{info['price']:,.2f}", 
-        "Div Yield": f"{info['div_yield']*100:.1f}%"
-    } for t, info in stocks.items()])
+    df = pd.DataFrame([{"Ticker": t, "Company": info["name"], "Price (GC)": f"{info['price']:,.2f}", "Div Yield": f"{info['div_yield']*100:.1f}%"} for t, info in stocks.items()])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 with tab2:
     st.subheader("Stock Price Charts")
     ticker = st.selectbox("Select Company", list(stocks.keys()))
     weeks = st.slider("Show last N weeks", 5, 100, 40)
-    
     history = price_history.get(ticker, [])
-    st.caption(f"Data points available: **{len(history)}**")
-    
+    st.caption(f"Data points: **{len(history)}**")
     if len(history) > 1:
         df = pd.DataFrame(history[-weeks:])
         df["date"] = pd.to_datetime(df["date"])
         fig = go.Figure(go.Scatter(x=df["date"], y=df["price"], mode='lines+markers'))
         fig.update_layout(title=f"{ticker} - {stocks[ticker]['name']}", height=550)
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("Simulate at least 2-3 weeks to generate chart data.")
 
 with tab3:
     st.subheader("💼 Your Portfolio")
@@ -156,26 +161,16 @@ with tab3:
             shares = holdings.get(t, 0)
             value = shares * info["price"]
             net += value
-            rows.append({
-                "Ticker": t, 
-                "Company": info["name"], 
-                "Shares": shares, 
-                "Price": f"{info['price']:,.2f}", 
-                "Value": f"{value:,.2f}",
-                "Div Yield": f"{info['div_yield']*100:.1f}%"
-            })
+            rows.append({"Ticker": t, "Company": info["name"], "Shares": shares, "Price": f"{info['price']:,.2f}", "Value": f"{value:,.2f}"})
         
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.write(f"**Net Worth**: {net:,.2f} GC")
 
         st.subheader("Trade")
         c1, c2, c3 = st.columns(3)
-        with c1:
-            tr_ticker = st.selectbox("Company", list(stocks.keys()), key="trade_ticker")
-        with c2:
-            action = st.radio("Action", ["Buy", "Sell"])
-        with c3:
-            qty = st.number_input("Shares", min_value=1, value=100)
+        with c1: tr_ticker = st.selectbox("Company", list(stocks.keys()), key="trade")
+        with c2: action = st.radio("Action", ["Buy", "Sell"])
+        with c3: qty = st.number_input("Shares", min_value=1, value=100)
         
         if st.button(action, type="primary"):
             current_price = stocks[tr_ticker]["price"]
@@ -186,7 +181,7 @@ with tab3:
                 if p["cash"] >= cost:
                     p["cash"] -= cost
                     p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
-                    st.success(f"Bought {qty} shares at {current_price:,.2f} GC")
+                    st.success(f"Bought {qty} shares!")
                 else:
                     st.error("Not enough credits!")
             else:
@@ -197,7 +192,7 @@ with tab3:
                     p["holdings"][tr_ticker] -= qty
                     if p["holdings"][tr_ticker] <= 0:
                         del p["holdings"][tr_ticker]
-                    st.success(f"Sold {qty} shares at {current_price:,.2f} GC")
+                    st.success(f"Sold {qty} shares!")
                 else:
                     st.error("Not enough shares!")
             st.rerun()
@@ -214,6 +209,10 @@ with tab4:
             fig = go.Figure(go.Scatter(x=df["date"], y=df["net_worth"], mode='lines+markers'))
             fig.update_layout(title=f"{player_sel}'s Net Worth Over Time", height=600)
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Simulate several weeks to see performance history.")
+    else:
+        st.info("No portfolio history yet. Simulate weeks after creating a portfolio.")
 
 with tab5:
     st.subheader("Advance the Market")
@@ -227,6 +226,6 @@ with tab5:
 with st.sidebar:
     if st.button("💾 Save Game"):
         save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
-        st.success("Game Saved!")
+        st.success("Saved!")
 
 save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
