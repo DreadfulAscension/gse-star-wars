@@ -4,8 +4,175 @@ import json
 from datetime import datetime, timedelta
 import pandas as pd
 import plotly.graph_objects as go
+import os
 
-st.set_page_config(page_title="Galactic Stock Exchange", layout="wide", page_icon="🌌")
+st.set_page_config(
+    page_title="Galactic Trade Network",
+    layout="wide",
+    page_icon="🌌",
+    initial_sidebar_state="expanded"
+)
+
+# ====================== GTN / SWTOR POLISHED CSS ======================
+st.markdown("""
+<style>
+    /* Deep space background with starfield */
+    .stApp {
+        background: linear-gradient(rgba(8, 12, 28, 0.92), rgba(2, 4, 18, 0.95)), 
+                    url('https://images.unsplash.com/photo-1464802686167-b939a7060ca4?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb') center/cover fixed;
+        color: #00f5ff;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* Holographic Main Header */
+    .main-header {
+        background: linear-gradient(90deg, #001122, #003355, #001122);
+        padding: 25px 30px;
+        border: 2px solid #00ccff;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 0 30px rgba(0, 204, 255, 0.5);
+        text-align: center;
+        position: relative;
+    }
+    .main-header h1 {
+        color: #00ffff !important;
+        font-size: 3rem;
+        text-shadow: 
+            0 0 10px #00ffff,
+            0 0 25px #00ffff,
+            0 0 45px #0088ff;
+        letter-spacing: 8px;
+        margin: 0;
+        text-transform: uppercase;
+    }
+    .main-header .subtitle {
+        color: #aaccff;
+        font-size: 1.15rem;
+        letter-spacing: 4px;
+        margin-top: 8px;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #0a1328;
+        border: 2px solid #00aaff;
+        border-radius: 6px;
+        padding: 4px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        color: #88ccff;
+        background-color: #0a1328;
+    }
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(#003355, #001f33) !important;
+        color: #00ffff !important;
+        border-bottom: 4px solid #00ffcc;
+    }
+
+    /* Dataframes */
+    .stDataFrame {
+        background-color: #0a1428;
+        border: 1px solid #336699;
+    }
+    .stDataFrame thead th {
+        background-color: #001f3a;
+        color: #00ffcc;
+    }
+    .stDataFrame tbody tr:hover {
+        background-color: rgba(0, 255, 200, 0.08) !important;
+        box-shadow: inset 0 0 12px rgba(0, 255, 200, 0.3);
+    }
+
+    /* Buttons */
+    .stButton>button {
+        background: linear-gradient(#cc4400, #aa3300);
+        color: white;
+        border: 2px solid #ff8800;
+        border-radius: 4px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        box-shadow: 0 0 12px #ff5500;
+        transition: all 0.2s;
+    }
+    .stButton>button:hover {
+        background: linear-gradient(#ff6600, #dd4400);
+        box-shadow: 0 0 25px #ffaa00;
+        transform: translateY(-2px);
+    }
+    .stButton>button[kind="primary"] {
+        background: linear-gradient(#00aa77, #008866);
+        border-color: #00ffcc;
+        box-shadow: 0 0 15px #00ffaa;
+    }
+
+    /* Inputs */
+    .stTextInput>div>div>input,
+    .stSelectbox>div>div>select,
+    .stNumberInput>div>div>input {
+        background-color: #0a1628;
+        color: #bbddff;
+        border: 1px solid #4477aa;
+    }
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background-color: #05080f;
+        border-right: 3px solid #00aaff;
+    }
+
+    /* Messages */
+    .stSuccess {
+        background-color: #002211;
+        border-left: 6px solid #00ff99;
+    }
+    .stError {
+        background-color: #220000;
+        border-left: 6px solid #ff5555;
+    }
+
+    /* Plotly Charts */
+    .js-plotly-plot {
+        background-color: #0a1328 !important;
+        border: 1px solid #336699;
+    }
+
+    /* Subtle scanline + holo effect */
+    .stApp::after {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: repeating-linear-gradient(
+            transparent 0px,
+            transparent 3px,
+            rgba(0, 255, 220, 0.025) 3px,
+            rgba(0, 255, 220, 0.025) 6px
+        );
+        pointer-events: none;
+        z-index: 9999;
+        animation: flicker 8s infinite alternate;
+    }
+
+    @keyframes flicker {
+        0%   { opacity: 0.95; }
+        100% { opacity: 1.0; }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ====================== AUTHENTIC GTN HEADER ======================
+st.markdown("""
+<div class="main-header">
+    <h1>GALACTIC TRADE NETWORK</h1>
+    <div class="subtitle">THE OLD REPUBLIC ERA • SECURE TRADING TERMINAL</div>
+</div>
+""", unsafe_allow_html=True)
+
+st.caption(f"**Current Cycle**: {datetime.now().strftime('%Y-%m-%d')} • Terminal Node: COR-77 • Republic/Imperial Joint Venture")
 
 # ====================== STOCK DATABASE ======================
 stocks = {
@@ -63,6 +230,7 @@ def save_data(portfolios, current_date, price_history, portfolio_history):
     except:
         pass
 
+# ====================== SESSION STATE ======================
 if 'initialized' not in st.session_state:
     st.session_state.portfolios, st.session_state.current_date, st.session_state.price_history, st.session_state.portfolio_history = load_data()
     st.session_state.initialized = True
@@ -117,15 +285,17 @@ def simulate_week():
             if total_div > 0:
                 st.success(f"💰 Dividends Paid to {player}: {total_div:,.2f} GC")
 
-# ====================== UI ======================
-st.title("🌌 Galactic Stock Exchange")
-st.caption(f"**The Old Republic Era** • {st.session_state.current_date.strftime('%Y-%m-%d')}")
-
+# ====================== UI TABS ======================
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Market", "📈 Stock Charts", "💼 Portfolio", "📈 Portfolio Performance", "🚀 Simulate", "🏦 Takeover"])
 
 with tab1:
     st.subheader("Current Market Prices")
-    df = pd.DataFrame([{"Ticker": t, "Company": info["name"], "Price (GC)": f"{info['price']:,.2f}", "Div Yield": f"{info['div_yield']*100:.1f}%"} for t, info in stocks.items()])
+    df = pd.DataFrame([{
+        "Ticker": t, 
+        "Company": info["name"], 
+        "Price (GC)": f"{info['price']:,.2f}", 
+        "Div Yield": f"{info['div_yield']*100:.1f}%"
+    } for t, info in stocks.items()])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 with tab2:
@@ -161,27 +331,34 @@ with tab3:
             shares = holdings.get(t, 0)
             value = shares * info["price"]
             net += value
-            rows.append({"Ticker": t, "Company": info["name"], "Shares": shares, "Price": f"{info['price']:,.2f}", "Value": f"{value:,.2f}"})
+            rows.append({
+                "Ticker": t, 
+                "Company": info["name"], 
+                "Shares": shares, 
+                "Price": f"{info['price']:,.2f}", 
+                "Value": f"{value:,.2f}"
+            })
         
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.write(f"**Net Worth**: {net:,.2f} GC")
 
         st.subheader("Trade")
         c1, c2, c3 = st.columns(3)
-        with c1: tr_ticker = st.selectbox("Company", list(stocks.keys()), key="trade")
-        with c2: action = st.radio("Action", ["Buy", "Sell"])
-        with c3: qty = st.number_input("Shares", min_value=1, value=100)
+        with c1: 
+            tr_ticker = st.selectbox("Company", list(stocks.keys()), key="trade")
+        with c2: 
+            action = st.radio("Action", ["Buy", "Sell"])
+        with c3: 
+            qty = st.number_input("Shares", min_value=1, value=100)
         
         if st.button(action, type="primary"):
             current_price = stocks[tr_ticker]["price"]
-            st.info(f"Current price of **{tr_ticker}**: {current_price:,.2f} GC")
-            
             if action == "Buy":
                 cost = current_price * qty * 1.015
                 if p["cash"] >= cost:
                     p["cash"] -= cost
                     p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
-                    st.success(f"Bought {qty} shares!")
+                    st.success(f"Bought {qty} shares of {tr_ticker}!")
                 else:
                     st.error("Not enough credits!")
             else:
@@ -192,7 +369,7 @@ with tab3:
                     p["holdings"][tr_ticker] -= qty
                     if p["holdings"][tr_ticker] <= 0:
                         del p["holdings"][tr_ticker]
-                    st.success(f"Sold {qty} shares!")
+                    st.success(f"Sold {qty} shares of {tr_ticker}!")
                 else:
                     st.error("Not enough shares!")
             st.rerun()
@@ -223,9 +400,14 @@ with tab5:
         st.success(f"Advanced {weeks} weeks!")
         st.rerun()
 
+with tab6:
+    st.info("🏦 Corporate Takeover system coming soon...")
+
+# ====================== SIDEBAR ======================
 with st.sidebar:
     if st.button("💾 Save Game"):
         save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
-        st.success("Saved!")
+        st.success("Game Saved Successfully!")
 
+# Auto-save on every run
 save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
