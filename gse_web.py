@@ -132,6 +132,7 @@ def simulate_week():
             if total_div > 0:
                 st.success(f"💰 Dividends Paid to {player}: {total_div:,.2f} GC")
 
+
 # ====================== DETAILED REPORT ======================
 def generate_portfolio_report(player):
     if player not in portfolios: return None
