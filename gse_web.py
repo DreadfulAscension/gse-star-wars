@@ -32,13 +32,6 @@ st.markdown("""
         text-shadow: 0 0 20px #00ffff; 
         letter-spacing: 8px; 
     }
-    .report-card { 
-        background-color: #0a1428; 
-        border: 1px solid #336699; 
-        padding: 20px; 
-        border-radius: 8px; 
-        margin: 15px 0; 
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,13 +130,9 @@ def simulate_week():
     st.session_state.current_date += timedelta(days=7)
     
     for player, p in portfolios.items():
-        if player not in portfolio_history:
-            portfolio_history[player] = []
+        if player not in portfolio_history: portfolio_history[player] = []
         net_worth = p.get("cash", 0) + sum(sh * stocks[t]["price"] for t, sh in p.get("holdings", {}).items())
-        portfolio_history[player].append({
-            "date": st.session_state.current_date.strftime('%Y-%m-%d'),
-            "net_worth": round(net_worth, 2)
-        })
+        portfolio_history[player].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "net_worth": round(net_worth, 2)})
     
     if st.session_state.current_date.day % 28 < 7:
         for player, p in portfolios.items():
@@ -157,10 +146,22 @@ def simulate_week():
             if total_div > 0:
                 st.success(f"💰 Dividends Paid to {player}: {total_div:,.2f} GC")
 
+# ====================== ENSURE PORTFOLIO INTEGRITY ======================
+def ensure_portfolio_structure(player):
+    if player not in portfolios:
+        return False
+    p = portfolios[player]
+    if "holdings" not in p: p["holdings"] = {}
+    if "transactions" not in p: p["transactions"] = []
+    if "total_dividends" not in p: p["total_dividends"] = 0.0
+    if "cash" not in p: p["cash"] = 250000.0
+    return True
+
 # ====================== PORTFOLIO REPORT ======================
 def generate_portfolio_report(player):
-    if player not in portfolios: return None
+    if not ensure_portfolio_structure(player): return None
     p = portfolios[player]
+    # ... (same as before - unchanged for brevity)
     holdings = p.get("holdings", {})
     transactions = p.get("transactions", [])
     
@@ -174,88 +175,57 @@ def generate_portfolio_report(player):
         curr_price = stocks[ticker]["price"]
         value = shares * curr_price
         
-        buys = [tx for tx in transactions if tx["ticker"] == ticker and tx["action"] == "Buy"]
+        buys = [tx for tx in transactions if tx.get("ticker") == ticker and tx.get("action") == "Buy"]
+        avg_cost = curr_price
         if buys:
             total_bought = sum(tx["shares"] for tx in buys)
             total_spent = sum(tx["total"] for tx in buys)
             avg_cost = total_spent / total_bought if total_bought > 0 else curr_price
-        else:
-            avg_cost = curr_price
-        cost_basis = shares * avg_cost
         
+        cost_basis = shares * avg_cost
         pnl = value - cost_basis
         unrealized_pnl += pnl
         total_value += value
         total_cost_basis += cost_basis
         
         report_rows.append({
-            "Ticker": ticker,
-            "Company": stocks[ticker]["name"],
-            "Shares": shares,
-            "Avg Cost (GC)": round(avg_cost, 2),
-            "Current Price": round(curr_price, 2),
-            "Market Value": round(value, 2),
-            "Unrealized P&L": round(pnl, 2),
+            "Ticker": ticker, "Company": stocks[ticker]["name"], "Shares": shares,
+            "Avg Cost (GC)": round(avg_cost, 2), "Current Price": round(curr_price, 2),
+            "Market Value": round(value, 2), "Unrealized P&L": round(pnl, 2),
             "P&L %": round((pnl / cost_basis * 100), 2) if cost_basis > 0 else 0
         })
     
-    realized_gains = sum(tx.get("realized_gain", 0) for tx in transactions if tx["action"] == "Sell")
+    realized_gains = sum(tx.get("realized_gain", 0) for tx in transactions if tx.get("action") == "Sell")
     
     return {
-        "player": player,
-        "cash": p.get("cash", 0),
-        "total_value": total_value,
-        "net_worth": p.get("cash", 0) + total_value,
-        "total_cost_basis": total_cost_basis,
-        "unrealized_pnl": unrealized_pnl,
-        "realized_gains": realized_gains,
-        "total_dividends": p.get("total_dividends", 0),
-        "overall_pnl": realized_gains + unrealized_pnl,
-        "holdings": report_rows,
-        "transactions": transactions
+        "player": player, "cash": p.get("cash", 0), "total_value": total_value,
+        "net_worth": p.get("cash", 0) + total_value, "total_cost_basis": total_cost_basis,
+        "unrealized_pnl": unrealized_pnl, "realized_gains": realized_gains,
+        "total_dividends": p.get("total_dividends", 0), "overall_pnl": realized_gains + unrealized_pnl,
+        "holdings": report_rows, "transactions": transactions
     }
 
 # ====================== TABS ======================
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📊 Market", "📈 Charts", "💼 Portfolio", 
-    "📋 Detailed Report", "📈 Performance", "🚀 Simulate", "🏦 Takeover"
+    "📊 Market", "📈 Charts", "💼 Portfolio", "📋 Detailed Report", 
+    "📈 Performance", "🚀 Simulate", "🏦 Takeover"
 ])
 
-# Tab 1: Market
-with tab1:
-    st.subheader("Current Market Prices")
-    df = pd.DataFrame([{
-        "Ticker": t,
-        "Company": info["name"],
-        "Price (GC)": f"{info['price']:,.2f}",
-        "Div Yield": f"{info['div_yield']*100:.1f}%"
-    } for t, info in stocks.items()])
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-# Tab 2: Charts
-with tab2:
-    st.subheader("Stock Price Charts")
-    ticker = st.selectbox("Select Company", list(stocks.keys()))
-    weeks = st.slider("Show last N weeks", 5, 100, 40)
-    history = price_history.get(ticker, [])
-    if len(history) > 1:
-        df_hist = pd.DataFrame(history[-weeks:])
-        df_hist["date"] = pd.to_datetime(df_hist["date"])
-        fig = go.Figure(go.Scatter(x=df_hist["date"], y=df_hist["price"], mode='lines+markers'))
-        fig.update_layout(title=f"{ticker} - {stocks[ticker]['name']}", height=550)
-        st.plotly_chart(fig, use_container_width=True)
-
-# Tab 3: Portfolio
-with tab3:
+with tab3:  # Portfolio
     st.subheader("💼 Your Portfolio")
     player = st.text_input("Character Name", "Jedi Knight Sera", key="player_name")
     
     if player not in portfolios:
         if st.button("Create Portfolio"):
-            portfolios[player] = {"cash": 250000.0, "holdings": {}, "transactions": [], "total_dividends": 0.0}
+            portfolios[player] = {
+                "cash": 250000.0, 
+                "holdings": {}, 
+                "transactions": [], 
+                "total_dividends": 0.0
+            }
             st.rerun()
     
-    if player in portfolios:
+    if ensure_portfolio_structure(player):
         p = portfolios[player]
         st.write(f"**Cash Balance**: {p['cash']:,.2f} GC")
         
@@ -268,18 +238,15 @@ with tab3:
                     value = shares * stocks[t]["price"]
                     net += value
                     rows.append({
-                        "Ticker": t,
-                        "Company": stocks[t]["name"],
-                        "Shares": shares,
-                        "Price": f"{stocks[t]['price']:,.2f}",
-                        "Value": f"{value:,.2f}"
+                        "Ticker": t, "Company": stocks[t]["name"], "Shares": shares,
+                        "Price": f"{stocks[t]['price']:,.2f}", "Value": f"{value:,.2f}"
                     })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             st.write(f"**Net Worth**: {net:,.2f} GC")
         else:
             st.info("You currently hold no shares.")
 
-        # Trade
+        # === TRADE SECTION ===
         st.subheader("Execute Trade")
         c1, c2, c3 = st.columns(3)
         with c1: tr_ticker = st.selectbox("Select Stock", list(stocks.keys()), key="trade_ticker")
@@ -287,102 +254,44 @@ with tab3:
         with c3: qty = st.number_input("Quantity", min_value=1, value=100)
         
         if st.button(action, type="primary"):
-            price = stocks[tr_ticker]["price"]
-            if action == "Buy":
-                total_cost = round(price * qty * 1.015, 2)
-                if p["cash"] >= total_cost:
-                    p["cash"] -= total_cost
-                    p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
-                    p["transactions"].append({
-                        "date": st.session_state.current_date.strftime('%Y-%m-%d'),
-                        "ticker": tr_ticker, "action": "Buy", "shares": qty,
-                        "price": price, "total": total_cost
-                    })
-                    st.success(f"✅ Bought {qty} {tr_ticker}")
-                else:
-                    st.error("Insufficient funds!")
+            if tr_ticker not in stocks:
+                st.error("Invalid stock!")
             else:
-                if tr_ticker in p.get("holdings", {}) and p["holdings"][tr_ticker] >= qty:
-                    revenue = round(price * qty * 0.985, 2)
-                    p["cash"] += revenue
-                    p["holdings"][tr_ticker] -= qty
-                    if p["holdings"][tr_ticker] <= 0:
-                        del p["holdings"][tr_ticker]
-                    p["transactions"].append({
-                        "date": st.session_state.current_date.strftime('%Y-%m-%d'),
-                        "ticker": tr_ticker, "action": "Sell", "shares": qty,
-                        "price": price, "total": revenue, "realized_gain": 0
-                    })
-                    st.success(f"✅ Sold {qty} {tr_ticker}")
-                else:
-                    st.error("Not enough shares!")
+                price = stocks[tr_ticker]["price"]
+                if action == "Buy":
+                    total_cost = round(price * qty * 1.015, 2)
+                    if p["cash"] >= total_cost:
+                        p["cash"] -= total_cost
+                        p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
+                        p["transactions"].append({
+                            "date": st.session_state.current_date.strftime('%Y-%m-%d'),
+                            "ticker": tr_ticker, "action": "Buy", "shares": qty,
+                            "price": price, "total": total_cost
+                        })
+                        st.success(f"✅ Bought {qty} shares of {tr_ticker}!")
+                    else:
+                        st.error("Insufficient funds!")
+                else:  # Sell
+                    current_holdings = p["holdings"].get(tr_ticker, 0)
+                    if current_holdings >= qty:
+                        revenue = round(price * qty * 0.985, 2)
+                        p["cash"] += revenue
+                        p["holdings"][tr_ticker] -= qty
+                        if p["holdings"][tr_ticker] <= 0:
+                            del p["holdings"][tr_ticker]
+                        p["transactions"].append({
+                            "date": st.session_state.current_date.strftime('%Y-%m-%d'),
+                            "ticker": tr_ticker, "action": "Sell", "shares": qty,
+                            "price": price, "total": revenue, "realized_gain": 0
+                        })
+                        st.success(f"✅ Sold {qty} shares of {tr_ticker}!")
+                    else:
+                        st.error("Not enough shares!")
             st.rerun()
 
-# Tab 4: Detailed Report
-with tab4:
-    st.subheader("📋 GTN Portfolio Intelligence Report")
-    report_player = st.text_input("Character Name", "Jedi Knight Sera", key="report_player")
-    
-    if report_player in portfolios:
-        report = generate_portfolio_report(report_player)
-        if report:
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: st.metric("Net Worth", f"{report['net_worth']:,.0f} GC")
-            with c2: st.metric("Total P&L", f"{report['overall_pnl']:,.0f} GC", 
-                              delta=f"{report['overall_pnl']/report['total_cost_basis']*100:+.1f}%" if report['total_cost_basis'] > 0 else None)
-            with c3: st.metric("Realized Gains", f"{report['realized_gains']:,.0f} GC")
-            with c4: st.metric("Dividends", f"{report['total_dividends']:,.0f} GC")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if report["holdings"]:
-                    fig = px.pie(pd.DataFrame(report["holdings"]), names="Ticker", values="Market Value", title="Portfolio Allocation")
-                    st.plotly_chart(fig, use_container_width=True)
-            with col2:
-                if report["holdings"]:
-                    df_hold = pd.DataFrame(report["holdings"])
-                    fig2 = px.bar(df_hold, x="Ticker", y="Unrealized P&L", title="Unrealized P&L per Stock", color="Unrealized P&L")
-                    st.plotly_chart(fig2, use_container_width=True)
-            
-            st.subheader("Current Holdings")
-            st.dataframe(pd.DataFrame(report["holdings"]), use_container_width=True, hide_index=True)
-            
-            st.subheader("Transaction History")
-            if report["transactions"]:
-                st.dataframe(pd.DataFrame(report["transactions"]), use_container_width=True, hide_index=True)
-            else:
-                st.info("No transactions yet.")
-    else:
-        st.warning("Create a portfolio first.")
+# Rest of the tabs (Market, Charts, Report, etc.) are the same as my previous response.
+# (For brevity I didn't repeat all tabs again — just replace the Portfolio tab with the one above)
 
-# Tab 5: Performance
-with tab5:
-    st.subheader("📈 Portfolio Performance")
-    if portfolio_history:
-        player_sel = st.selectbox("Select Player", list(portfolio_history.keys()), key="perf_player")
-        hist = portfolio_history.get(player_sel, [])
-        if len(hist) > 1:
-            df = pd.DataFrame(hist)
-            df["date"] = pd.to_datetime(df["date"])
-            fig = go.Figure(go.Scatter(x=df["date"], y=df["net_worth"], mode='lines+markers'))
-            fig.update_layout(title=f"{player_sel}'s Net Worth Over Time", height=600)
-            st.plotly_chart(fig, use_container_width=True)
-
-# Tab 6: Simulate
-with tab6:
-    st.subheader("Advance the Market")
-    weeks = st.slider("Number of weeks", 1, 12, 1)
-    if st.button("🚀 Simulate Weeks", type="primary"):
-        for _ in range(weeks):
-            simulate_week()
-        st.success(f"Advanced {weeks} weeks!")
-        st.rerun()
-
-# Tab 7: Takeover
-with tab7:
-    st.info("🏦 Corporate Takeover & Hostile Acquisition module coming soon...")
-
-# ====================== SIDEBAR ======================
 with st.sidebar:
     if st.button("💾 Save Game"):
         save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
