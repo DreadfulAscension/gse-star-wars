@@ -45,7 +45,7 @@ st.markdown("""
 st.caption(f"**Current Cycle**: {datetime.now().strftime('%Y-%m-%d')} • Terminal Node: COR-77")
 
 # ====================== STOCK DATABASE ======================
-stocks = {
+INITIAL_STOCKS = {
     "KDY": {"name": "Kuat Drive Yards", "price": 245.0, "vol": 0.12, "sector": "Starships", "div_yield": 0.018},
     "CZRK": {"name": "Czerka Corporation", "price": 178.0, "vol": 0.18, "sector": "Conglomerate", "div_yield": 0.012},
     "SITH": {"name": "Imperial Armaments Ltd.", "price": 132.0, "vol": 0.25, "sector": "Military", "div_yield": 0.008},
@@ -68,6 +68,12 @@ stocks = {
     "VOSS": {"name": "Voss Mystics Ltd.", "price": 158.0, "vol": 0.22, "sector": "Cultural", "div_yield": 0.011},
 }
 
+# Live stocks in session state (survives reruns)
+if 'stocks' not in st.session_state:
+    st.session_state.stocks = {ticker: data.copy() for ticker, data in INITIAL_STOCKS.items()}
+
+stocks = st.session_state.stocks
+
 DATA_FILE = "gse_data.json"
 
 def load_data():
@@ -75,6 +81,7 @@ def load_data():
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE, "r") as f:
                 data = json.load(f)
+                # Restore saved prices
                 for t, p in data.get("stocks", {}).items():
                     if t in stocks:
                         stocks[t]["price"] = float(p)
@@ -109,9 +116,11 @@ portfolios = st.session_state.portfolios
 price_history = st.session_state.price_history
 portfolio_history = st.session_state.portfolio_history
 
+# Initialize price history if missing
 for ticker in stocks:
     if ticker not in price_history or not price_history[ticker]:
-        price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": stocks[ticker]["price"]}]
+        price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), 
+                                  "price": stocks[ticker]["price"]}]
 
 def ensure_portfolio_structure(player):
     if player not in portfolios:
@@ -127,23 +136,43 @@ def ensure_portfolio_structure(player):
 def simulate_week():
     for ticker, data in stocks.items():
         roll = random.gauss(0, data["vol"] * 100)
-        if roll > 20: change = random.uniform(18, 40)
-        elif roll > 8: change = random.uniform(5, 18)
-        elif roll > -9: change = random.uniform(-5, 5)
-        elif roll > -21: change = random.uniform(-18, -5)
-        else: change = random.uniform(-40, -18)
+        if roll > 20: 
+            change = random.uniform(18, 40)
+        elif roll > 8: 
+            change = random.uniform(5, 18)
+        elif roll > -9: 
+            change = random.uniform(-5, 5)
+        elif roll > -21: 
+            change = random.uniform(-18, -5)
+        else: 
+            change = random.uniform(-40, -18)
         
         new_price = max(1.0, round(data["price"] * (1 + change/100), 2))
         data["price"] = new_price
-        price_history[ticker].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": new_price})
+        
+        if ticker not in price_history:
+            price_history[ticker] = []
+        price_history[ticker].append({
+            "date": st.session_state.current_date.strftime('%Y-%m-%d'), 
+            "price": new_price
+        })
     
     st.session_state.current_date += timedelta(days=7)
     
+    # Update portfolio history
     for player, p in portfolios.items():
-        if player not in portfolio_history: portfolio_history[player] = []
-        net_worth = p.get("cash", 0) + sum(sh * stocks.get(t, {}).get("price", 0) for t, sh in p.get("holdings", {}).items())
-        portfolio_history[player].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "net_worth": round(net_worth, 2)})
+        if player not in portfolio_history: 
+            portfolio_history[player] = []
+        net_worth = p.get("cash", 0) + sum(
+            sh * stocks.get(t, {}).get("price", 0) 
+            for t, sh in p.get("holdings", {}).items()
+        )
+        portfolio_history[player].append({
+            "date": st.session_state.current_date.strftime('%Y-%m-%d'), 
+            "net_worth": round(net_worth, 2)
+        })
     
+    # Dividends every ~4 weeks
     if st.session_state.current_date.day % 28 < 7:
         for player, p in portfolios.items():
             total_div = 0
@@ -165,7 +194,6 @@ def generate_portfolio_report(player):
     transactions = p.get("transactions", [])
     
     total_value = 0
-    total_cost_basis = 0
     unrealized_pnl = 0
     report_rows = []
     
@@ -175,24 +203,19 @@ def generate_portfolio_report(player):
         curr_price = stocks[ticker]["price"]
         value = shares * curr_price
         
-        # Better average cost calculation
-        buys = [tx for tx in transactions 
-                if tx.get("ticker") == ticker and tx.get("action") == "Buy"]
-        
+        buys = [tx for tx in transactions if tx.get("ticker") == ticker and tx.get("action") == "Buy"]
         if buys:
-            total_shares_bought = sum(tx["shares"] for tx in buys)
-            total_spent = sum(tx["total"] for tx in buys)  # includes fees
-            avg_cost = total_spent / total_shares_bought
+            total_shares = sum(tx["shares"] for tx in buys)
+            total_spent = sum(tx["total"] for tx in buys)
+            avg_cost = total_spent / total_shares
         else:
             avg_cost = curr_price
             
         cost_basis = shares * avg_cost
         pnl = value - cost_basis
-        pnl_pct = (pnl / cost_basis * 100) if cost_basis > 0 else 0
         
         unrealized_pnl += pnl
         total_value += value
-        total_cost_basis += cost_basis
         
         report_rows.append({
             "Ticker": ticker,
@@ -202,11 +225,10 @@ def generate_portfolio_report(player):
             "Current Price": round(curr_price, 2),
             "Market Value": round(value, 2),
             "Unrealized P&L": round(pnl, 2),
-            "P&L %": round(pnl_pct, 2)
+            "P&L %": round((pnl / cost_basis * 100), 2) if cost_basis > 0 else 0
         })
     
-    realized_gains = sum(tx.get("realized_gain", 0) for tx in transactions 
-                         if tx.get("action") == "Sell")
+    realized_gains = sum(tx.get("realized_gain", 0) for tx in transactions if tx.get("action") == "Sell")
     
     return {
         "player": player,
@@ -227,8 +249,11 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 
 with tab1:
     st.subheader("Current Market Prices")
-    market_data = [{"Ticker": t, "Company": info["name"], "Price (GC)": f"{info['price']:,.2f}", 
-                    "Div Yield": f"{info['div_yield']*100:.1f}%", "Sector": info.get("sector", "")} 
+    market_data = [{"Ticker": t, 
+                    "Company": info["name"], 
+                    "Price (GC)": f"{info['price']:,.2f}", 
+                    "Div Yield": f"{info['div_yield']*100:.1f}%", 
+                    "Sector": info.get("sector", "")} 
                    for t, info in stocks.items()]
     st.dataframe(pd.DataFrame(market_data), use_container_width=True, hide_index=True)
 
@@ -244,19 +269,13 @@ with tab2:
         fig.update_layout(title=f"{ticker} - {stocks[ticker]['name']}", height=550)
         st.plotly_chart(fig, use_container_width=True)
 
-# ====================== TRADING LOGIC ======================
 with tab3:
     st.subheader("💼 Your Portfolio")
     player = st.text_input("Character Name", "Jedi Knight Sera", key="player_name")
     
     if player not in portfolios:
         if st.button("Create Portfolio"):
-            portfolios[player] = {
-                "cash": 250000.0, 
-                "holdings": {}, 
-                "transactions": [], 
-                "total_dividends": 0.0
-            }
+            portfolios[player] = {"cash": 250000.0, "holdings": {}, "transactions": [], "total_dividends": 0.0}
             st.rerun()
     
     if ensure_portfolio_structure(player):
@@ -271,19 +290,16 @@ with tab3:
                 if t in stocks:
                     value = shares * stocks[t]["price"]
                     net += value
-                    rows.append({
-                        "Ticker": t, 
-                        "Company": stocks[t]["name"], 
-                        "Shares": shares,
-                        "Price": f"{stocks[t]['price']:,.2f}", 
-                        "Value": f"{value:,.2f}"
-                    })
+                    rows.append({"Ticker": t, 
+                                 "Company": stocks[t]["name"], 
+                                 "Shares": shares,
+                                 "Price": f"{stocks[t]['price']:,.2f}", 
+                                 "Value": f"{value:,.2f}"})
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             st.write(f"**Net Worth**: {net:,.2f} GC")
         else:
             st.info("You currently hold no shares.")
 
-        # ====================== TRADE EXECUTION ======================
         st.subheader("Execute Trade")
         c1, c2, c3 = st.columns(3)
         with c1: 
@@ -294,7 +310,7 @@ with tab3:
             qty = st.number_input("Quantity", min_value=1, value=100, step=10)
 
         current_price = stocks[tr_ticker]["price"]
-        fee_rate = 0.013  # 1.3%
+        fee_rate = 0.013
 
         st.info(f"**Current Market Price**: {current_price:,.2f} GC")
 
@@ -310,20 +326,14 @@ with tab3:
                     
                     p["transactions"].append({
                         "date": st.session_state.current_date.strftime('%Y-%m-%d'),
-                        "ticker": tr_ticker,
-                        "action": "Buy",
-                        "shares": qty,
-                        "price": current_price,
-                        "fee": round(fee, 2),
-                        "total": total_cost
+                        "ticker": tr_ticker, "action": "Buy", "shares": qty,
+                        "price": current_price, "fee": round(fee, 2), "total": total_cost
                     })
-                    st.success(f"✅ **BOUGHT** {qty} {tr_ticker} @ {current_price:,.2f} GC (+{fee:,.2f} fee)")
+                    st.success(f"✅ Bought {qty} shares of {tr_ticker} @ {current_price:,.2f}")
                 else:
                     st.error("Insufficient funds!")
-                    
             else:  # Sell
-                current_shares = p["holdings"].get(tr_ticker, 0)
-                if current_shares >= qty:
+                if p["holdings"].get(tr_ticker, 0) >= qty:
                     revenue_before_fee = current_price * qty
                     fee = revenue_before_fee * fee_rate
                     total_revenue = round(revenue_before_fee - fee, 2)
@@ -335,18 +345,14 @@ with tab3:
                     
                     p["transactions"].append({
                         "date": st.session_state.current_date.strftime('%Y-%m-%d'),
-                        "ticker": tr_ticker,
-                        "action": "Sell",
-                        "shares": qty,
-                        "price": current_price,
-                        "fee": round(fee, 2),
-                        "total": total_revenue
+                        "ticker": tr_ticker, "action": "Sell", "shares": qty,
+                        "price": current_price, "fee": round(fee, 2), "total": total_revenue
                     })
-                    st.success(f"✅ **SOLD** {qty} {tr_ticker} @ {current_price:,.2f} GC (-{fee:,.2f} fee)")
+                    st.success(f"✅ Sold {qty} shares of {tr_ticker} @ {current_price:,.2f}")
                 else:
                     st.error("Not enough shares!")
-            
             st.rerun()
+
 with tab4:
     st.subheader("📋 GTN Portfolio Intelligence Report")
     report_player = st.text_input("Character Name", "Jedi Knight Sera", key="report_player")
@@ -406,4 +412,5 @@ with st.sidebar:
         save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
         st.success("Game Saved!")
 
+# Auto-save on every rerun
 save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
