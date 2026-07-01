@@ -13,36 +13,17 @@ st.set_page_config(page_title="Galactic Trade Network", layout="wide", page_icon
 # ====================== CSS ======================
 st.markdown("""
 <style>
-    .stApp {
-        background: linear-gradient(rgba(8,12,28,0.92), rgba(2,4,18,0.95)), 
-                    url('https://images.unsplash.com/photo-1464802686167-b939a7060ca4?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb') center/cover fixed;
-        color: #00f5ff;
-    }
-    .main-header {
-        background: linear-gradient(90deg, #001122, #003355, #001122);
-        padding: 25px 30px;
-        border: 2px solid #00ccff;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        text-align: center;
-        box-shadow: 0 0 30px rgba(0, 204, 255, 0.5);
-    }
-    .main-header h1 { 
-        color: #00ffff !important; 
-        font-size: 3rem; 
-        text-shadow: 0 0 20px #00ffff; 
-        letter-spacing: 8px; 
-    }
+    .stApp { background: linear-gradient(rgba(8,12,28,0.92), rgba(2,4,18,0.95)), 
+             url('https://images.unsplash.com/photo-1464802686167-b939a7060ca4?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb') center/cover fixed;
+             color: #00f5ff; }
+    .main-header { background: linear-gradient(90deg, #001122, #003355, #001122);
+                   padding: 25px 30px; border: 2px solid #00ccff; border-radius: 8px;
+                   margin-bottom: 20px; text-align: center; box-shadow: 0 0 30px rgba(0, 204, 255, 0.5); }
+    .main-header h1 { color: #00ffff !important; font-size: 3rem; text-shadow: 0 0 20px #00ffff; letter-spacing: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-<div class="main-header">
-    <h1>GALACTIC TRADE NETWORK</h1>
-    <div class="subtitle">THE OLD REPUBLIC ERA • SECURE TRADING TERMINAL</div>
-</div>
-""", unsafe_allow_html=True)
-
+st.markdown('<div class="main-header"><h1>GALACTIC TRADE NETWORK</h1><div class="subtitle">THE OLD REPUBLIC ERA • SECURE TRADING TERMINAL</div></div>', unsafe_allow_html=True)
 st.caption(f"**Current Cycle**: {datetime.now().strftime('%Y-%m-%d')} • Terminal Node: COR-77")
 
 # ====================== STOCK DATABASE ======================
@@ -73,15 +54,12 @@ if 'stocks' not in st.session_state:
     st.session_state.stocks = {ticker: data.copy() for ticker, data in INITIAL_STOCKS.items()}
 
 stocks = st.session_state.stocks
-
 DATA_FILE = "gse_data.json"
-BACKUP_DIR = "backups"
-os.makedirs(BACKUP_DIR, exist_ok=True)
 
-def load_from_file(file_path=DATA_FILE):
+def load_from_file():
     try:
-        if os.path.exists(file_path):
-            with open(file_path, "r") as f:
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "r") as f:
                 data = json.load(f)
                 for t, p in data.get("stocks", {}).items():
                     if t in stocks:
@@ -170,22 +148,73 @@ def simulate_week():
             if total_div > 0:
                 st.success(f"💰 Dividends Paid to {player}: {total_div:,.2f} GC")
 
-# ====================== CORPORATE TAKEOVER ======================
+# ====================== REPORT FUNCTION ======================
+def generate_portfolio_report(player):
+    if not ensure_portfolio_structure(player): return None
+    p = portfolios[player]
+    holdings = p.get("holdings", {})
+    transactions = p.get("transactions", [])
+    
+    total_value = 0
+    unrealized_pnl = 0
+    report_rows = []
+    
+    for ticker, shares in holdings.items():
+        if ticker not in stocks: continue
+        curr_price = stocks[ticker]["price"]
+        value = shares * curr_price
+        
+        buys = [tx for tx in transactions if tx.get("ticker") == ticker and tx.get("action") == "Buy"]
+        avg_cost = curr_price
+        if buys:
+            total_bought = sum(tx["shares"] for tx in buys)
+            total_spent = sum(tx["total"] for tx in buys)
+            avg_cost = total_spent / total_bought if total_bought > 0 else curr_price
+        
+        cost_basis = shares * avg_cost
+        pnl = value - cost_basis
+        unrealized_pnl += pnl
+        total_value += value
+        
+        report_rows.append({
+            "Ticker": ticker,
+            "Company": stocks[ticker]["name"],
+            "Shares": shares,
+            "Avg Cost (GC)": round(avg_cost, 2),
+            "Current Price": round(curr_price, 2),
+            "Market Value": round(value, 2),
+            "Unrealized P&L": round(pnl, 2),
+            "P&L %": round((pnl / cost_basis * 100), 2) if cost_basis > 0 else 0
+        })
+    
+    realized_gains = sum(tx.get("realized_gain", 0) for tx in transactions if tx.get("action") == "Sell")
+    
+    return {
+        "player": player,
+        "cash": p.get("cash", 0),
+        "net_worth": p.get("cash", 0) + total_value,
+        "overall_pnl": realized_gains + unrealized_pnl,
+        "realized_gains": realized_gains,
+        "total_dividends": p.get("total_dividends", 0),
+        "holdings": report_rows,
+        "transactions": transactions
+    }
+
+# ====================== TAKEOVER ======================
 def attempt_takeover(player, ticker):
     p = portfolios[player]
     current_price = stocks[ticker]["price"]
-    required_cost = round(current_price * 1.45 * 510000, 2)  # 51% stake with premium
-    
-    if p["cash"] >= required_cost:
-        p["cash"] -= required_cost
-        if ticker not in p.get("controlled_companies", []):
+    cost = round(current_price * 1.45 * 510000, 2)
+    if p["cash"] >= cost:
+        p["cash"] -= cost
+        if ticker not in p["controlled_companies"]:
             p["controlled_companies"].append(ticker)
         bonus = round(current_price * 8000, 2)
         p["cash"] += bonus
-        st.success(f"🎉 SUCCESSFUL TAKEOVER of {ticker}! Bonus: {bonus:,.0f} GC")
+        st.success(f"🎉 Takeover of {ticker} successful! Bonus: {bonus:,.0f} GC")
         return True
     else:
-        st.error(f"Need {required_cost:,.0f} GC for takeover.")
+        st.error(f"Insufficient funds. Need {cost:,.0f} GC.")
         return False
 
 # ====================== TABS ======================
@@ -226,15 +255,110 @@ with tab3:
     if ensure_portfolio_structure(player):
         p = portfolios[player]
         st.write(f"**Cash Balance**: {p.get('cash', 0):,.2f} GC")
-        # ... (rest of portfolio display and trading code - same as previous versions) ...
-        # (I kept it short here for brevity, but you can copy the full trading section from earlier messages)
+        
+        holdings = p.get("holdings", {})
+        if holdings:
+            rows = []
+            net = p.get("cash", 0)
+            for t, shares in holdings.items():
+                if t in stocks:
+                    value = shares * stocks[t]["price"]
+                    net += value
+                    rows.append({"Ticker": t, "Company": stocks[t]["name"], "Shares": shares,
+                                 "Price": f"{stocks[t]['price']:,.2f}", "Value": f"{value:,.2f}"})
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.write(f"**Net Worth**: {net:,.2f} GC")
+        else:
+            st.info("No holdings yet.")
+
+        st.subheader("Execute Trade")
+        c1, c2, c3 = st.columns(3)
+        with c1: tr_ticker = st.selectbox("Select Stock", list(stocks.keys()), key="trade_ticker")
+        with c2: action = st.radio("Action", ["Buy", "Sell"])
+        with c3: qty = st.number_input("Quantity", min_value=1, value=100, step=10)
+        
+        current_price = stocks[tr_ticker]["price"]
+        fee_rate = 0.013
+        st.info(f"**Current Price**: {current_price:,.2f} GC")
+        
+        if st.button(action, type="primary"):
+            if action == "Buy":
+                cost = round(current_price * qty * (1 + fee_rate), 2)
+                if p["cash"] >= cost:
+                    p["cash"] -= cost
+                    p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
+                    p["transactions"].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "ticker": tr_ticker, "action": "Buy", "shares": qty, "price": current_price, "total": cost})
+                    st.success(f"Bought {qty} {tr_ticker}")
+                    save_to_file()
+                else:
+                    st.error("Insufficient funds!")
+            else:
+                if p["holdings"].get(tr_ticker, 0) >= qty:
+                    revenue = round(current_price * qty * (1 - fee_rate), 2)
+                    p["cash"] += revenue
+                    p["holdings"][tr_ticker] -= qty
+                    if p["holdings"][tr_ticker] <= 0:
+                        del p["holdings"][tr_ticker]
+                    p["transactions"].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "ticker": tr_ticker, "action": "Sell", "shares": qty, "price": current_price, "total": revenue})
+                    st.success(f"Sold {qty} {tr_ticker}")
+                    save_to_file()
+                else:
+                    st.error("Not enough shares!")
+            st.rerun()
+
+with tab4:
+    st.subheader("📋 Detailed Report")
+    report_player = st.text_input("Character Name", "Jedi Knight Sera", key="report_player")
+    if report_player in portfolios:
+        report = generate_portfolio_report(report_player)
+        if report:
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: st.metric("Net Worth", f"{report['net_worth']:,.0f} GC")
+            with c2: st.metric("Total P&L", f"{report['overall_pnl']:,.0f} GC")
+            with c3: st.metric("Realized Gains", f"{report['realized_gains']:,.0f} GC")
+            with c4: st.metric("Dividends", f"{report['total_dividends']:,.0f} GC")
+            
+            if report["holdings"]:
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig = px.pie(pd.DataFrame(report["holdings"]), names="Ticker", values="Market Value", title="Allocation")
+                    st.plotly_chart(fig, use_container_width=True)
+                with col2:
+                    df_hold = pd.DataFrame(report["holdings"])
+                    fig2 = px.bar(df_hold, x="Ticker", y="Unrealized P&L", title="Unrealized P&L")
+                    st.plotly_chart(fig2, use_container_width=True)
+            
+            st.dataframe(pd.DataFrame(report["holdings"]), use_container_width=True, hide_index=True)
+            st.subheader("Transactions")
+            st.dataframe(pd.DataFrame(report["transactions"]), use_container_width=True, hide_index=True)
+
+with tab5:
+    st.subheader("📈 Portfolio Performance")
+    if portfolio_history:
+        player_sel = st.selectbox("Select Player", list(portfolio_history.keys()), key="perf")
+        hist = portfolio_history.get(player_sel, [])
+        if len(hist) > 1:
+            df = pd.DataFrame(hist)
+            df["date"] = pd.to_datetime(df["date"])
+            fig = go.Figure(go.Scatter(x=df["date"], y=df["net_worth"], mode='lines+markers'))
+            fig.update_layout(title=f"{player_sel}'s Net Worth Over Time", height=600)
+            st.plotly_chart(fig, use_container_width=True)
+
+with tab6:
+    st.subheader("🚀 Advance Market")
+    weeks = st.slider("Number of weeks", 1, 12, 1)
+    if st.button("Simulate Weeks", type="primary"):
+        for _ in range(weeks):
+            simulate_week()
+        save_to_file()
+        st.success(f"Advanced {weeks} weeks!")
+        st.rerun()
 
 with tab7:
     st.subheader("🏦 Corporate Takeover")
-    st.write("Acquire majority control of a company.")
     player = st.text_input("Character Name", "Jedi Knight Sera", key="takeover_player")
     if ensure_portfolio_structure(player):
-        ticker = st.selectbox("Target Company", list(stocks.keys()), key="takeover_select")
+        ticker = st.selectbox("Target Company", list(stocks.keys()), key="takeover_ticker")
         if st.button("🚀 Launch Takeover", type="primary"):
             attempt_takeover(player, ticker)
             save_to_file()
@@ -259,7 +383,6 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.write("**Manual Backup**")
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "rb") as f:
             st.download_button("⬇️ Download Save File", f, file_name=f"gtn_save_{datetime.now().strftime('%Y%m%d_%H%M')}.json", mime="application/json")
@@ -274,10 +397,10 @@ with st.sidebar:
             st.session_state.current_date = datetime.fromisoformat(data.get("current_date", datetime.now().isoformat()))
             st.session_state.price_history = data.get("price_history", {})
             st.session_state.portfolio_history = data.get("portfolio_history", {})
-            st.success("Save loaded successfully!")
+            st.success("Save loaded!")
             st.rerun()
         except:
-            st.error("Invalid save file.")
+            st.error("Invalid file.")
 
     if st.button("🗑️ New Game"):
         if st.checkbox("Confirm reset?"):
@@ -286,4 +409,4 @@ with st.sidebar:
             st.success("New game started!")
             st.rerun()
 
-save_to_file()  # Auto-save
+save_to_file()
