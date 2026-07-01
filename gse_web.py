@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import os
+import shutil
 
 st.set_page_config(page_title="Galactic Trade Network", layout="wide", page_icon="🌌", initial_sidebar_state="expanded")
 
@@ -68,20 +69,25 @@ INITIAL_STOCKS = {
     "VOSS": {"name": "Voss Mystics Ltd.", "price": 158.0, "vol": 0.22, "sector": "Cultural", "div_yield": 0.011},
 }
 
-# Live stocks in session state (survives reruns)
 if 'stocks' not in st.session_state:
     st.session_state.stocks = {ticker: data.copy() for ticker, data in INITIAL_STOCKS.items()}
 
 stocks = st.session_state.stocks
 
 DATA_FILE = "gse_data.json"
+BACKUP_DIR = "backups"
+os.makedirs(BACKUP_DIR, exist_ok=True)
+
+def create_backup():
+    if os.path.exists(DATA_FILE):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shutil.copy(DATA_FILE, f"{BACKUP_DIR}/gse_data_{timestamp}.json")
 
 def load_data():
     try:
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE, "r") as f:
                 data = json.load(f)
-                # Restore saved prices
                 for t, p in data.get("stocks", {}).items():
                     if t in stocks:
                         stocks[t]["price"] = float(p)
@@ -93,34 +99,38 @@ def load_data():
         pass
     return {}, datetime.now(), {}, {}
 
-def save_data(portfolios, current_date, price_history, portfolio_history):
+def save_data():
     try:
+        create_backup()
         data = {
             "stocks": {t: stocks[t]["price"] for t in stocks},
-            "portfolios": portfolios,
-            "current_date": current_date.isoformat(),
-            "price_history": price_history,
-            "portfolio_history": portfolio_history
+            "portfolios": st.session_state.portfolios,
+            "current_date": st.session_state.current_date.isoformat(),
+            "price_history": st.session_state.price_history,
+            "portfolio_history": st.session_state.portfolio_history
         }
         with open(DATA_FILE, "w") as f:
             json.dump(data, f, indent=2)
+        return True
     except:
-        pass
+        return False
 
 # ====================== SESSION STATE ======================
 if 'initialized' not in st.session_state:
-    st.session_state.portfolios, st.session_state.current_date, st.session_state.price_history, st.session_state.portfolio_history = load_data()
+    portfolios, current_date, price_history, portfolio_history = load_data()
+    st.session_state.portfolios = portfolios
+    st.session_state.current_date = current_date
+    st.session_state.price_history = price_history
+    st.session_state.portfolio_history = portfolio_history
     st.session_state.initialized = True
 
 portfolios = st.session_state.portfolios
 price_history = st.session_state.price_history
 portfolio_history = st.session_state.portfolio_history
 
-# Initialize price history if missing
 for ticker in stocks:
     if ticker not in price_history or not price_history[ticker]:
-        price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), 
-                                  "price": stocks[ticker]["price"]}]
+        price_history[ticker] = [{"date": st.session_state.current_date.strftime('%Y-%m-%d'), "price": stocks[ticker]["price"]}]
 
 def ensure_portfolio_structure(player):
     if player not in portfolios:
@@ -136,16 +146,11 @@ def ensure_portfolio_structure(player):
 def simulate_week():
     for ticker, data in stocks.items():
         roll = random.gauss(0, data["vol"] * 100)
-        if roll > 20: 
-            change = random.uniform(18, 40)
-        elif roll > 8: 
-            change = random.uniform(5, 18)
-        elif roll > -9: 
-            change = random.uniform(-5, 5)
-        elif roll > -21: 
-            change = random.uniform(-18, -5)
-        else: 
-            change = random.uniform(-40, -18)
+        if roll > 20: change = random.uniform(18, 40)
+        elif roll > 8: change = random.uniform(5, 18)
+        elif roll > -9: change = random.uniform(-5, 5)
+        elif roll > -21: change = random.uniform(-18, -5)
+        else: change = random.uniform(-40, -18)
         
         new_price = max(1.0, round(data["price"] * (1 + change/100), 2))
         data["price"] = new_price
@@ -159,20 +164,14 @@ def simulate_week():
     
     st.session_state.current_date += timedelta(days=7)
     
-    # Update portfolio history
     for player, p in portfolios.items():
-        if player not in portfolio_history: 
-            portfolio_history[player] = []
-        net_worth = p.get("cash", 0) + sum(
-            sh * stocks.get(t, {}).get("price", 0) 
-            for t, sh in p.get("holdings", {}).items()
-        )
+        if player not in portfolio_history: portfolio_history[player] = []
+        net_worth = p.get("cash", 0) + sum(sh * stocks.get(t, {}).get("price", 0) for t, sh in p.get("holdings", {}).items())
         portfolio_history[player].append({
             "date": st.session_state.current_date.strftime('%Y-%m-%d'), 
             "net_worth": round(net_worth, 2)
         })
     
-    # Dividends every ~4 weeks
     if st.session_state.current_date.day % 28 < 7:
         for player, p in portfolios.items():
             total_div = 0
@@ -185,10 +184,9 @@ def simulate_week():
             if total_div > 0:
                 st.success(f"💰 Dividends Paid to {player}: {total_div:,.2f} GC")
 
-# ====================== REPORT FUNCTION ======================
+# ====================== REPORT ======================
 def generate_portfolio_report(player):
-    if not ensure_portfolio_structure(player): 
-        return None
+    if not ensure_portfolio_structure(player): return None
     p = portfolios[player]
     holdings = p.get("holdings", {})
     transactions = p.get("transactions", [])
@@ -198,22 +196,19 @@ def generate_portfolio_report(player):
     report_rows = []
     
     for ticker, shares in holdings.items():
-        if ticker not in stocks: 
-            continue
+        if ticker not in stocks: continue
         curr_price = stocks[ticker]["price"]
         value = shares * curr_price
         
         buys = [tx for tx in transactions if tx.get("ticker") == ticker and tx.get("action") == "Buy"]
+        avg_cost = curr_price
         if buys:
-            total_shares = sum(tx["shares"] for tx in buys)
+            total_bought = sum(tx["shares"] for tx in buys)
             total_spent = sum(tx["total"] for tx in buys)
-            avg_cost = total_spent / total_shares
-        else:
-            avg_cost = curr_price
-            
+            avg_cost = total_spent / total_bought if total_bought > 0 else curr_price
+        
         cost_basis = shares * avg_cost
         pnl = value - cost_basis
-        
         unrealized_pnl += pnl
         total_value += value
         
@@ -249,11 +244,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 
 with tab1:
     st.subheader("Current Market Prices")
-    market_data = [{"Ticker": t, 
-                    "Company": info["name"], 
-                    "Price (GC)": f"{info['price']:,.2f}", 
-                    "Div Yield": f"{info['div_yield']*100:.1f}%", 
-                    "Sector": info.get("sector", "")} 
+    market_data = [{"Ticker": t, "Company": info["name"], "Price (GC)": f"{info['price']:,.2f}", 
+                    "Div Yield": f"{info['div_yield']*100:.1f}%", "Sector": info.get("sector", "")} 
                    for t, info in stocks.items()]
     st.dataframe(pd.DataFrame(market_data), use_container_width=True, hide_index=True)
 
@@ -276,6 +268,7 @@ with tab3:
     if player not in portfolios:
         if st.button("Create Portfolio"):
             portfolios[player] = {"cash": 250000.0, "holdings": {}, "transactions": [], "total_dividends": 0.0}
+            save_data()
             st.rerun()
     
     if ensure_portfolio_structure(player):
@@ -290,11 +283,8 @@ with tab3:
                 if t in stocks:
                     value = shares * stocks[t]["price"]
                     net += value
-                    rows.append({"Ticker": t, 
-                                 "Company": stocks[t]["name"], 
-                                 "Shares": shares,
-                                 "Price": f"{stocks[t]['price']:,.2f}", 
-                                 "Value": f"{value:,.2f}"})
+                    rows.append({"Ticker": t, "Company": stocks[t]["name"], "Shares": shares,
+                                 "Price": f"{stocks[t]['price']:,.2f}", "Value": f"{value:,.2f}"})
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             st.write(f"**Net Worth**: {net:,.2f} GC")
         else:
@@ -302,53 +292,47 @@ with tab3:
 
         st.subheader("Execute Trade")
         c1, c2, c3 = st.columns(3)
-        with c1: 
-            tr_ticker = st.selectbox("Select Stock", list(stocks.keys()), key="trade_ticker")
-        with c2: 
-            action = st.radio("Action", ["Buy", "Sell"])
-        with c3: 
-            qty = st.number_input("Quantity", min_value=1, value=100, step=10)
-
+        with c1: tr_ticker = st.selectbox("Select Stock", list(stocks.keys()), key="trade_ticker")
+        with c2: action = st.radio("Action", ["Buy", "Sell"])
+        with c3: qty = st.number_input("Quantity", min_value=1, value=100, step=10)
+        
         current_price = stocks[tr_ticker]["price"]
         fee_rate = 0.013
-
         st.info(f"**Current Market Price**: {current_price:,.2f} GC")
 
         if st.button(action, type="primary"):
             if action == "Buy":
-                cost_before_fee = current_price * qty
-                fee = cost_before_fee * fee_rate
-                total_cost = round(cost_before_fee + fee, 2)
-                
+                cost_before = current_price * qty
+                fee = cost_before * fee_rate
+                total_cost = round(cost_before + fee, 2)
                 if p["cash"] >= total_cost:
                     p["cash"] -= total_cost
                     p["holdings"][tr_ticker] = p["holdings"].get(tr_ticker, 0) + qty
-                    
                     p["transactions"].append({
                         "date": st.session_state.current_date.strftime('%Y-%m-%d'),
                         "ticker": tr_ticker, "action": "Buy", "shares": qty,
-                        "price": current_price, "fee": round(fee, 2), "total": total_cost
+                        "price": current_price, "fee": round(fee,2), "total": total_cost
                     })
-                    st.success(f"✅ Bought {qty} shares of {tr_ticker} @ {current_price:,.2f}")
+                    st.success(f"✅ Bought {qty} {tr_ticker} @ {current_price:,.2f}")
+                    save_data()
                 else:
                     st.error("Insufficient funds!")
-            else:  # Sell
+            else:
                 if p["holdings"].get(tr_ticker, 0) >= qty:
-                    revenue_before_fee = current_price * qty
-                    fee = revenue_before_fee * fee_rate
-                    total_revenue = round(revenue_before_fee - fee, 2)
-                    
-                    p["cash"] += total_revenue
+                    rev_before = current_price * qty
+                    fee = rev_before * fee_rate
+                    total_rev = round(rev_before - fee, 2)
+                    p["cash"] += total_rev
                     p["holdings"][tr_ticker] -= qty
                     if p["holdings"][tr_ticker] <= 0:
                         del p["holdings"][tr_ticker]
-                    
                     p["transactions"].append({
                         "date": st.session_state.current_date.strftime('%Y-%m-%d'),
                         "ticker": tr_ticker, "action": "Sell", "shares": qty,
-                        "price": current_price, "fee": round(fee, 2), "total": total_revenue
+                        "price": current_price, "fee": round(fee,2), "total": total_rev
                     })
-                    st.success(f"✅ Sold {qty} shares of {tr_ticker} @ {current_price:,.2f}")
+                    st.success(f"✅ Sold {qty} {tr_ticker} @ {current_price:,.2f}")
+                    save_data()
                 else:
                     st.error("Not enough shares!")
             st.rerun()
@@ -373,7 +357,7 @@ with tab4:
             with col2:
                 if report["holdings"]:
                     df_hold = pd.DataFrame(report["holdings"])
-                    fig2 = px.bar(df_hold, x="Ticker", y="Unrealized P&L", title="Unrealized P&L", color="Unrealized P&L")
+                    fig2 = px.bar(df_hold, x="Ticker", y="Unrealized P&L", title="Unrealized P&L")
                     st.plotly_chart(fig2, use_container_width=True)
             
             st.subheader("Current Holdings")
@@ -401,16 +385,38 @@ with tab6:
     if st.button("🚀 Simulate Weeks", type="primary"):
         for _ in range(weeks):
             simulate_week()
+        save_data()
         st.success(f"Advanced {weeks} weeks!")
         st.rerun()
 
 with tab7:
     st.info("🏦 Corporate Takeover system coming soon...")
 
+# ====================== SIDEBAR ======================
 with st.sidebar:
-    if st.button("💾 Save Game"):
-        save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
-        st.success("Game Saved!")
+    st.subheader("💾 Persistence Controls")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💾 Save Game"):
+            if save_data():
+                st.success("✅ Game Saved!")
+    with col2:
+        if st.button("🔄 Load Game"):
+            portfolios, current_date, price_history, portfolio_history = load_data()
+            st.session_state.portfolios = portfolios
+            st.session_state.current_date = current_date
+            st.session_state.price_history = price_history
+            st.session_state.portfolio_history = portfolio_history
+            st.success("✅ Game Loaded!")
+            st.rerun()
+    
+    if st.button("🗑️ New Game (Reset)"):
+        if st.checkbox("Confirm reset? This cannot be undone."):
+            if os.path.exists(DATA_FILE):
+                os.remove(DATA_FILE)
+            st.session_state.clear()
+            st.success("New game started!")
+            st.rerun()
 
-# Auto-save on every rerun
-save_data(portfolios, st.session_state.current_date, price_history, portfolio_history)
+# Auto-save after interactions
+save_data()
