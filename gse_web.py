@@ -216,7 +216,58 @@ def attempt_takeover(player, ticker):
     else:
         st.error(f"Insufficient funds. Need {cost:,.0f} GC.")
         return False
-
+# ====================== NEW: MONTHLY REPORT GENERATOR ======================
+def generate_monthly_report(player, target_month=None):
+    if not ensure_portfolio_structure(player):
+        return None, None
+    
+    p = portfolios[player]
+    transactions = p.get("transactions", [])
+    if not transactions:
+        return None, None
+    
+    # Filter by month if specified
+    df_tx = pd.DataFrame(transactions)
+    df_tx['date'] = pd.to_datetime(df_tx['date'])
+    if target_month:
+        df_tx = df_tx[df_tx['date'].dt.to_period('M') == target_month]
+    
+    if df_tx.empty:
+        return None, None
+    
+    # Basic stats
+    total_trades = len(df_tx)
+    buys = df_tx[df_tx['action'] == 'Buy']
+    sells = df_tx[df_tx['action'] == 'Sell']
+    
+    total_invested = buys['total'].sum() if not buys.empty else 0
+    total_received = sells['total'].sum() if not sells.empty else 0
+    
+    # Current portfolio value
+    holdings = p.get("holdings", {})
+    current_value = sum(sh * stocks[t]["price"] for t, sh in holdings.items() if t in stocks)
+    net_worth = p.get("cash", 0) + current_value
+    
+    # Create HTML Report
+    html = f"""
+    <h1 style="color:#00ffff; text-align:center;">GALACTIC TRADE NETWORK - MONTHLY REPORT</h1>
+    <h2 style="color:#aaccff;">Player: {player} | Period: {target_month if target_month else 'All Time'}</h2>
+    <hr>
+    <h3>Summary Statistics</h3>
+    <p><strong>Net Worth:</strong> {net_worth:,.2f} GC</p>
+    <p><strong>Total Trades:</strong> {total_trades} | Buys: {len(buys)} | Sells: {len(sells)}</p>
+    <p><strong>Total Invested:</strong> {total_invested:,.2f} GC | Total Received from Sales: {total_received:,.2f} GC</p>
+    <p><strong>Dividends Received:</strong> {p.get("total_dividends", 0):,.2f} GC</p>
+    """
+    
+    # Add charts as HTML (Plotly can be converted, but for simplicity we describe + tables)
+    html += "<h3>Current Holdings</h3>"
+    html += pd.DataFrame(generate_portfolio_report(player)["holdings"]).to_html(index=False)
+    
+    html += "<h3>Transaction History</h3>"
+    html += df_tx.to_html(index=False)
+    
+    return html, df_tx
 # ====================== TABS ======================
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Market", "📈 Charts", "💼 Portfolio", "📋 Detailed Report", 
@@ -410,3 +461,8 @@ with st.sidebar:
             st.rerun()
 
 save_to_file()
+ st.markdown("---")
+    st.caption("Export Tools")
+    if st.button("📊 Quick Full Report"):
+        # Generates current full report
+        pass
