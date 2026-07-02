@@ -12,26 +12,13 @@ st.set_page_config(page_title="Galactic Trade Network", layout="wide", page_icon
 # ====================== CSS ======================
 st.markdown("""
 <style>
-    .stApp { 
-        background: linear-gradient(rgba(8,12,28,0.92), rgba(2,4,18,0.95)), 
-                    url('https://images.unsplash.com/photo-1464802686167-b939a7060ca4?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb') center/cover fixed;
-        color: #00f5ff; 
-    }
-    .main-header { 
-        background: linear-gradient(90deg, #001122, #003355, #001122);
-        padding: 25px 30px; 
-        border: 2px solid #00ccff; 
-        border-radius: 8px;
-        margin-bottom: 20px; 
-        text-align: center; 
-        box-shadow: 0 0 30px rgba(0, 204, 255, 0.5); 
-    }
-    .main-header h1 { 
-        color: #00ffff !important; 
-        font-size: 3rem; 
-        text-shadow: 0 0 20px #00ffff; 
-        letter-spacing: 8px; 
-    }
+    .stApp { background: linear-gradient(rgba(8,12,28,0.92), rgba(2,4,18,0.95)), 
+             url('https://images.unsplash.com/photo-1464802686167-b939a7060ca4?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb') center/cover fixed;
+             color: #00f5ff; }
+    .main-header { background: linear-gradient(90deg, #001122, #003355, #001122);
+                   padding: 25px 30px; border: 2px solid #00ccff; border-radius: 8px;
+                   margin-bottom: 20px; text-align: center; box-shadow: 0 0 30px rgba(0, 204, 255, 0.5); }
+    .main-header h1 { color: #00ffff !important; font-size: 3rem; text-shadow: 0 0 20px #00ffff; letter-spacing: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,7 +26,7 @@ st.markdown('<div class="main-header"><h1>GALACTIC TRADE NETWORK</h1><div class=
 st.caption(f"**Current Cycle**: {datetime.now().strftime('%Y-%m-%d')} • Terminal Node: COR-77")
 
 # ====================== STOCK DATABASE ======================
-stocks = {
+INITIAL_STOCKS = {
     "KDY": {"name": "Kuat Drive Yards", "price": 245.0, "vol": 0.12, "sector": "Starships", "div_yield": 0.018},
     "CZRK": {"name": "Czerka Corporation", "price": 178.0, "vol": 0.18, "sector": "Conglomerate", "div_yield": 0.012},
     "SITH": {"name": "Imperial Armaments Ltd.", "price": 132.0, "vol": 0.25, "sector": "Military", "div_yield": 0.008},
@@ -62,6 +49,10 @@ stocks = {
     "VOSS": {"name": "Voss Mystics Ltd.", "price": 158.0, "vol": 0.22, "sector": "Cultural", "div_yield": 0.011},
 }
 
+if 'stocks' not in st.session_state:
+    st.session_state.stocks = {ticker: data.copy() for ticker, data in INITIAL_STOCKS.items()}
+
+stocks = st.session_state.stocks
 DATA_FILE = "gse_data.json"
 
 def load_from_file():
@@ -123,7 +114,7 @@ def ensure_portfolio_structure(player):
     if "cash" not in p: p["cash"] = 250000.0
     return True
 
-# ====================== SIMULATE WEEK ======================
+# ====================== CORE FUNCTIONS ======================
 def simulate_week():
     for ticker, data in stocks.items():
         roll = random.gauss(0, data["vol"] * 100)
@@ -143,18 +134,6 @@ def simulate_week():
         if player not in portfolio_history: portfolio_history[player] = []
         net_worth = p.get("cash", 0) + sum(sh * stocks.get(t, {}).get("price", 0) for t, sh in p.get("holdings", {}).items())
         portfolio_history[player].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "net_worth": round(net_worth, 2)})
-    
-    if st.session_state.current_date.day % 28 < 7:
-        for player, p in portfolios.items():
-            total_div = 0
-            for t, sh in p.get("holdings", {}).items():
-                if t in stocks and sh > 0:
-                    div = stocks[t]["price"] * stocks[t]["div_yield"] * sh / 4
-                    p["cash"] += div
-                    total_div += div
-                    p["total_dividends"] = p.get("total_dividends", 0) + div
-            if total_div > 0:
-                st.success(f"💰 Dividends Paid to {player}: {total_div:,.2f} GC")
 
 def generate_portfolio_report(player):
     if not ensure_portfolio_structure(player): return None
@@ -181,70 +160,39 @@ def generate_portfolio_report(player):
         unrealized_pnl += pnl
         total_value += value
         report_rows.append({
-            "Ticker": ticker,
-            "Company": stocks[ticker]["name"],
-            "Shares": shares,
-            "Avg Cost (GC)": round(avg_cost, 2),
-            "Current Price": round(curr_price, 2),
-            "Market Value": round(value, 2),
-            "Unrealized P&L": round(pnl, 2),
+            "Ticker": ticker, "Company": stocks[ticker]["name"], "Shares": shares,
+            "Avg Cost": round(avg_cost, 2), "Current Price": round(curr_price, 2),
+            "Market Value": round(value, 2), "Unrealized P&L": round(pnl, 2),
             "P&L %": round((pnl / cost_basis * 100), 2) if cost_basis > 0 else 0
         })
     
-    realized_gains = sum(tx.get("realized_gain", 0) for tx in transactions if tx.get("action") == "Sell")
-    
     return {
-        "player": player,
         "cash": p.get("cash", 0),
         "net_worth": p.get("cash", 0) + total_value,
-        "overall_pnl": realized_gains + unrealized_pnl,
-        "realized_gains": realized_gains,
-        "total_dividends": p.get("total_dividends", 0),
         "holdings": report_rows,
         "transactions": transactions
     }
 
-def generate_monthly_report(player, target_month=None):
-    if not ensure_portfolio_structure(player):
-        return None
+def attempt_takeover(player, ticker):
     p = portfolios[player]
-    transactions = p.get("transactions", [])
-    if not transactions:
-        return None
-    df_tx = pd.DataFrame(transactions)
-    df_tx['date'] = pd.to_datetime(df_tx['date'])
-    if target_month:
-        df_tx = df_tx[df_tx['date'].dt.to_period('M') == target_month]
-    if df_tx.empty:
-        return None
-    total_trades = len(df_tx)
-    buys = df_tx[df_tx['action'] == 'Buy']
-    sells = df_tx[df_tx['action'] == 'Sell']
-    total_invested = buys['total'].sum() if not buys.empty else 0
-    total_received = sells['total'].sum() if not sells.empty else 0
-    current_value = sum(sh * stocks[t]["price"] for t, sh in p.get("holdings", {}).items() if t in stocks)
-    net_worth = p.get("cash", 0) + current_value
-    
-    html = f"""
-    <h1 style="color:#00ffff; text-align:center;">GALACTIC TRADE NETWORK - MONTHLY REPORT</h1>
-    <h2 style="color:#aaccff;">Player: {player} | Period: {target_month if target_month else 'All Time'}</h2>
-    <hr>
-    <h3>Summary Statistics</h3>
-    <p><strong>Net Worth:</strong> {net_worth:,.2f} GC</p>
-    <p><strong>Total Trades:</strong> {total_trades} | Buys: {len(buys)} | Sells: {len(sells)}</p>
-    <p><strong>Total Invested:</strong> {total_invested:,.2f} GC | Total Received: {total_received:,.2f} GC</p>
-    <p><strong>Dividends Received:</strong> {p.get("total_dividends", 0):,.2f} GC</p>
-    <h3>Current Holdings</h3>
-    {pd.DataFrame(generate_portfolio_report(player)["holdings"]).to_html(index=False)}
-    <h3>Transaction History</h3>
-    {df_tx.to_html(index=False)}
-    """
-    return html
+    current_price = stocks[ticker]["price"]
+    cost = round(current_price * 1.45 * 510000, 2)
+    if p["cash"] >= cost:
+        p["cash"] -= cost
+        if ticker not in p["controlled_companies"]:
+            p["controlled_companies"].append(ticker)
+        bonus = round(current_price * 8000, 2)
+        p["cash"] += bonus
+        st.success(f"🎉 Takeover of {ticker} successful!")
+        return True
+    else:
+        st.error("Insufficient funds for takeover.")
+        return False
 
 # ====================== TABS ======================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Market", "📈 Charts", "💼 Portfolio", "📋 Detailed Report", 
-    "📈 Performance", "🚀 Simulate", "🏦 Corporate Takeover"
+    "📈 Performance", "🚀 Simulate", "🏦 Takeover", "📊 Monthly Report"
 ])
 
 with tab1:
@@ -269,17 +217,14 @@ with tab2:
 with tab3:
     st.subheader("💼 Your Portfolio")
     player = st.text_input("Character Name", "Jedi Knight Sera", key="player_name")
-    
     if player not in portfolios:
         if st.button("Create Portfolio"):
             portfolios[player] = {"cash": 250000.0, "holdings": {}, "transactions": [], "total_dividends": 0.0, "controlled_companies": []}
             save_to_file()
             st.rerun()
-    
     if ensure_portfolio_structure(player):
         p = portfolios[player]
         st.write(f"**Cash Balance**: {p.get('cash', 0):,.2f} GC")
-        
         holdings = p.get("holdings", {})
         if holdings:
             rows = []
@@ -292,9 +237,7 @@ with tab3:
                                  "Price": f"{stocks[t]['price']:,.2f}", "Value": f"{value:,.2f}"})
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             st.write(f"**Net Worth**: {net:,.2f} GC")
-        else:
-            st.info("No holdings yet.")
-
+        
         st.subheader("Execute Trade")
         c1, c2, c3 = st.columns(3)
         with c1: tr_ticker = st.selectbox("Select Stock", list(stocks.keys()), key="trade_ticker")
@@ -321,8 +264,7 @@ with tab3:
                     revenue = round(current_price * qty * (1 - fee_rate), 2)
                     p["cash"] += revenue
                     p["holdings"][tr_ticker] -= qty
-                    if p["holdings"][tr_ticker] <= 0:
-                        del p["holdings"][tr_ticker]
+                    if p["holdings"][tr_ticker] <= 0: del p["holdings"][tr_ticker]
                     p["transactions"].append({"date": st.session_state.current_date.strftime('%Y-%m-%d'), "ticker": tr_ticker, "action": "Sell", "shares": qty, "price": current_price, "total": revenue})
                     st.success(f"Sold {qty} {tr_ticker}")
                     save_to_file()
@@ -338,38 +280,9 @@ with tab4:
         if report:
             c1, c2, c3, c4 = st.columns(4)
             with c1: st.metric("Net Worth", f"{report['net_worth']:,.0f} GC")
-            with c2: st.metric("Total P&L", f"{report['overall_pnl']:,.0f} GC")
-            with c3: st.metric("Realized Gains", f"{report['realized_gains']:,.0f} GC")
-            with c4: st.metric("Dividends", f"{report['total_dividends']:,.0f} GC")
-            
-            if report["holdings"]:
-                col1, col2 = st.columns(2)
-                with col1:
-                    fig = px.pie(pd.DataFrame(report["holdings"]), names="Ticker", values="Market Value", title="Allocation")
-                    st.plotly_chart(fig, use_container_width=True)
-                with col2:
-                    df_hold = pd.DataFrame(report["holdings"])
-                    fig2 = px.bar(df_hold, x="Ticker", y="Unrealized P&L", title="Unrealized P&L")
-                    st.plotly_chart(fig2, use_container_width=True)
-            
+            with c2: st.metric("Cash", f"{report['cash']:,.0f} GC")
+            with c3: st.metric("Holdings Value", f"{report['net_worth'] - report['cash']:,.0f} GC")
             st.dataframe(pd.DataFrame(report["holdings"]), use_container_width=True, hide_index=True)
-            st.subheader("Transactions")
-            st.dataframe(pd.DataFrame(report["transactions"]), use_container_width=True, hide_index=True)
-            
-            # Monthly Export
-            st.subheader("Monthly Report Export")
-            available_months = ["All Time"] + sorted({pd.to_datetime(tx["date"]).strftime('%Y-%m') for tx in report["transactions"]})
-            selected_month = st.selectbox("Select Period", available_months)
-            if st.button("📤 Export Full Monthly Report", type="primary"):
-                html_content = generate_monthly_report(report_player, None if selected_month == "All Time" else selected_month)
-                if html_content:
-                    st.download_button(
-                        label="Download HTML Report",
-                        data=html_content,
-                        file_name=f"{report_player.replace(' ', '_')}_GTN_Report_{selected_month}.html",
-                        mime="text/html"
-                    )
-                    st.success("Report downloaded!")
 
 with tab5:
     st.subheader("📈 Portfolio Performance")
@@ -380,11 +293,11 @@ with tab5:
             df = pd.DataFrame(hist)
             df["date"] = pd.to_datetime(df["date"])
             fig = go.Figure(go.Scatter(x=df["date"], y=df["net_worth"], mode='lines+markers'))
-            fig.update_layout(title=f"{player_sel}'s Net Worth Over Time", height=600)
+            fig.update_layout(title=f"{player_sel}'s Net Worth", height=600)
             st.plotly_chart(fig, use_container_width=True)
 
 with tab6:
-    st.subheader("🚀 Advance Market")
+    st.subheader("🚀 Simulate Market")
     weeks = st.slider("Number of weeks", 1, 12, 1)
     if st.button("Simulate Weeks", type="primary"):
         for _ in range(weeks):
@@ -399,22 +312,74 @@ with tab7:
     if ensure_portfolio_structure(player):
         ticker = st.selectbox("Target Company", list(stocks.keys()), key="takeover_ticker")
         if st.button("🚀 Launch Takeover", type="primary"):
-            # Call your attempt_takeover function here
-            st.info("Takeover logic placeholder - add your function")
+            attempt_takeover(player, ticker)
             save_to_file()
+            st.rerun()
+
+with tab8:
+    st.subheader("📊 Monthly Report")
+    player = st.text_input("Character Name", "Jedi Knight Sera", key="monthly_player")
+    if player in portfolios:
+        months = sorted(list(set([h["date"][:7] for h in price_history[list(price_history.keys())[0]]])))
+        selected_month = st.selectbox("Select Month", months[::-1] if months else ["Current"])
+        
+        if st.button("📄 Generate & Download Full Monthly Report", type="primary"):
+            with st.spinner("Generating comprehensive report..."):
+                html = f"""
+                <html><head><title>GTN Monthly Report - {selected_month}</title></head>
+                <body style="font-family:Arial; background:#001122; color:#00ffcc; padding:20px;">
+                <h1>Galactic Trade Network - Monthly Report</h1>
+                <h2>Player: {player} | Period: {selected_month}</h2>
+                <hr>
+                <h3>Portfolio Summary</h3>
+                <p><strong>Cash:</strong> {portfolios[player].get('cash',0):,.2f} GC</p>
+                <p><strong>Total Dividends:</strong> {portfolios[player].get('total_dividends',0):,.2f} GC</p>
+                <p>Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+                </body></html>
+                """
+                st.download_button(
+                    label="⬇️ Download HTML Report",
+                    data=html,
+                    file_name=f"GTN_Monthly_Report_{player}_{selected_month}.html",
+                    mime="text/html"
+                )
+                st.success("Report downloaded!")
 
 # ====================== SIDEBAR ======================
 with st.sidebar:
     st.subheader("💾 Save System")
-    if st.button("💾 Save Game"):
-        if save_to_file():
-            st.success("Game Saved!")
-    if st.button("🗑️ New Game"):
-        if st.checkbox("Confirm?"):
-            if os.path.exists(DATA_FILE):
-                os.remove(DATA_FILE)
-            st.session_state.clear()
-            st.success("New Game Started!")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💾 Save to Disk"):
+            if save_to_file(): st.success("Saved!")
+    with col2:
+        if st.button("🔄 Load from Disk"):
+            portfolios, current_date, price_history, portfolio_history = load_from_file()
+            st.session_state.portfolios = portfolios
+            st.session_state.current_date = current_date
+            st.session_state.price_history = price_history
+            st.session_state.portfolio_history = portfolio_history
+            st.success("Loaded!")
             st.rerun()
+
+    st.divider()
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "rb") as f:
+            st.download_button("⬇️ Download Save File", f, file_name=f"gtn_save_{datetime.now().strftime('%Y%m%d_%H%M')}.json", mime="application/json")
+    
+    uploaded = st.file_uploader("⬆️ Upload Save File", type="json")
+    if uploaded:
+        try:
+            data = json.load(uploaded)
+            for t, p in data.get("stocks", {}).items():
+                if t in stocks: stocks[t]["price"] = float(p)
+            st.session_state.portfolios = data.get("portfolios", {})
+            st.session_state.current_date = datetime.fromisoformat(data.get("current_date", datetime.now().isoformat()))
+            st.session_state.price_history = data.get("price_history", {})
+            st.session_state.portfolio_history = data.get("portfolio_history", {})
+            st.success("Save loaded!")
+            st.rerun()
+        except:
+            st.error("Invalid file.")
 
 save_to_file()
